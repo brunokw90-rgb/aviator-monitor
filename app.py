@@ -14,22 +14,25 @@ from flask import (
 # Config (variáveis de ambiente)
 # =========================
 # Secret key obrigatória para sessões no Flask
-_secret = os.getenv("SECRET_KEY")
-if not _secret or not _secret.strip():
-    # fallback seguro para não quebrar caso a env não esteja definida
+_secret = (os.getenv("SECRET_KEY") or "").strip()
+if not _secret:
+    # fallback para não quebrar se não houver SECRET_KEY no Render
     _secret = os.urandom(32).hex()
 SECRET_KEY = _secret
 
-# Credenciais
-APP_USER = os.getenv("USERNAME", os.getenv("APP_USER", "admin"))
-APP_PASS = os.getenv("PASSWORD", os.getenv("APP_PASS", "admin123"))
+# Credenciais (aceita USERNAME/PASSWORD ou APP_USER/APP_PASS)
+APP_USER = (os.getenv("USERNAME") or os.getenv("APP_USER", "admin")).strip()
+APP_PASS = (os.getenv("PASSWORD") or os.getenv("APP_PASS", "admin123")).strip()
 
-# Fonte de dados
-JSON_URL = os.getenv("DASHBOARD_JSON_URL", "").strip()
-CSV_PATH = os.getenv("CSV_PATH", "audit_out/live_rollup.csv").strip()
+# Fonte de dados (priorize JSON; deixe CSV vazio se não usar)
+JSON_URL = (os.getenv("DASHBOARD_JSON_URL", "")).strip()
+CSV_PATH = (os.getenv("CSV_PATH", "audit_out/live_rollup.csv")).strip()
 
 # Janela para cálculo de frequências
-WINDOW = int(os.getenv("FREQ_WINDOW", "500"))
+try:
+    WINDOW = int((os.getenv("FREQ_WINDOW", "500")).strip())
+except Exception:
+    WINDOW = 500
 
 # =========================
 # Flask
@@ -39,7 +42,7 @@ app.config["SECRET_KEY"] = SECRET_KEY
 
 # log simples para debug (remova em produção)
 print("FLASK SECRET_KEY set?", bool(app.config.get("SECRET_KEY")))
-
+print("Using JSON_URL?" , bool(JSON_URL), "| CSV_PATH:", CSV_PATH)
 
 # =========================
 # Helpers de autenticação
