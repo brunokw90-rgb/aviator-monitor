@@ -13,22 +13,32 @@ from flask import (
 # =========================
 # Config (variáveis de ambiente)
 # =========================
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me")  # troque em produção!
-APP_USER   = os.getenv("USERNAME", os.getenv("APP_USER", "admin"))
-APP_PASS   = os.getenv("PASSWORD", os.getenv("APP_PASS", "admin123"))
+# Secret key obrigatória para sessões no Flask
+_secret = os.getenv("SECRET_KEY")
+if not _secret or not _secret.strip():
+    # fallback seguro para não quebrar caso a env não esteja definida
+    _secret = os.urandom(32).hex()
+SECRET_KEY = _secret
+
+# Credenciais
+APP_USER = os.getenv("USERNAME", os.getenv("APP_USER", "admin"))
+APP_PASS = os.getenv("PASSWORD", os.getenv("APP_PASS", "admin123"))
 
 # Fonte de dados
-JSON_URL   = os.getenv("DASHBOARD_JSON_URL", "").strip()
-CSV_PATH   = os.getenv("CSV_PATH", "audit_out/live_rollup.csv").strip()
+JSON_URL = os.getenv("DASHBOARD_JSON_URL", "").strip()
+CSV_PATH = os.getenv("CSV_PATH", "audit_out/live_rollup.csv").strip()
 
 # Janela para cálculo de frequências
-WINDOW     = int(os.getenv("FREQ_WINDOW", "500"))
+WINDOW = int(os.getenv("FREQ_WINDOW", "500"))
 
 # =========================
 # Flask
 # =========================
 app = Flask(__name__)
-app.secret_key = SECRET_KEY
+app.config["SECRET_KEY"] = SECRET_KEY
+
+# log simples para debug (remova em produção)
+print("FLASK SECRET_KEY set?", bool(app.config.get("SECRET_KEY")))
 
 
 # =========================
