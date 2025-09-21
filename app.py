@@ -10,6 +10,18 @@ from flask import (
     render_template, render_template_string, flash, jsonify
 )
 
+import re
+
+def _parse_multiplier(x):
+    """Extrai número de strings como '1.0JS:1' -> 1.0; aceita int/float direto."""
+    if x is None:
+        return None
+    if isinstance(x, (int, float)):
+        return float(x)
+    s = str(x).strip().replace(',', '.')  # vírgula -> ponto, se vier assim
+    m = re.search(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?', s)
+    return float(m.group()) if m else None
+
 # =========================
 # Config (variáveis de ambiente)
 # =========================
@@ -89,8 +101,7 @@ def load_df_from_json(url: str) -> pd.DataFrame:
         if not isinstance(item, dict):
             continue
 
-        # multiplicador: inclui 'multiplicador' (pt-BR)
-        mult = (
+        mult_raw = (
             item.get("multiplier")
             or item.get("multiplicador")
             or item.get("mult")
@@ -99,16 +110,15 @@ def load_df_from_json(url: str) -> pd.DataFrame:
             or item.get("value")
             or item.get("x")
         )
+        mult = _parse_multiplier(mult_raw)  # <-- usa o parser novo
 
-        # data/hora: alguns endpoints trazem 'date' + 'end' (hora)
-        # tentamos combinar se existir
+        # data/hora
         date_part = item.get("datetime") or item.get("timestamp") or item.get("date") or item.get("data")
         time_part = item.get("time") or item.get("hora") or item.get("end")
-
         if date_part and time_part and isinstance(date_part, str) and isinstance(time_part, str):
             dt = f"{date_part} {time_part}"
         else:
-            dt = date_part or time_part  # o que houver
+            dt = date_part or time_part
 
         rows.append({
             "multiplier": mult,
@@ -118,9 +128,7 @@ def load_df_from_json(url: str) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
 
-    # Normaliza coluna de multiplicador para float e descarta vazios
-    if "multiplier" in df.columns:
-        df["multiplier"] = pd.to_numeric(df["multiplier"], errors="coerce")
+    # Já vem limpo; só descarta NaN
     return df.dropna(subset=["multiplier"])
 
 
