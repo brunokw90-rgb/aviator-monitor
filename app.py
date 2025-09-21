@@ -7,7 +7,7 @@ import pandas as pd
 import requests
 from flask import (
     Flask, request, redirect, url_for, session,
-    render_template, flash, jsonify
+    render_template, render_template_string, flash, jsonify
 )
 
 # =========================
