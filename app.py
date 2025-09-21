@@ -57,14 +57,14 @@ def login_required(view):
 
 
 # =========================
-# Leitura de dados
+# Leitura de dados (corrigidas p/ 'resultados' e 'multiplicador')
 # =========================
 def load_df_from_json(url: str) -> pd.DataFrame:
     """
-    Tenta ler dados do endpoint JSON. Aceita formatos:
-    - lista de objetos: [{"multiplier": 1.2, "time": "..."}, ...]
-    - objeto com lista: {"data": [...]} / {"result": [...]} / {"velas": [...]} etc.
-    Normaliza para um DataFrame com as colunas possíveis.
+    Lê o endpoint JSON. Aceita:
+    - lista direta: [{"multiplicador": 1.2, "date": "...", "end": "..."}]
+    - objeto com lista: {"data": [...]}, {"result": [...]}, {"resultados": [...]}, etc.
+    Normaliza p/ DataFrame com colunas ['multiplier', 'datetime', 'round'].
     """
     if not url:
         raise ValueError("JSON_URL vazio")
@@ -73,10 +73,10 @@ def load_df_from_json(url: str) -> pd.DataFrame:
     r.raise_for_status()
     data = r.json()
 
-    # Extrair a lista
+    # Extrair a lista de registros
     if isinstance(data, dict):
-        # tenta chaves comuns
-        for k in ("data", "result", "results", "velas", "candles", "items"):
+        # inclui 'resultados' (observado no seu endpoint)
+        for k in ("data", "result", "results", "resultados", "velas", "candles", "items"):
             if k in data and isinstance(data[k], list):
                 data = data[k]
                 break
@@ -89,34 +89,36 @@ def load_df_from_json(url: str) -> pd.DataFrame:
         if not isinstance(item, dict):
             continue
 
-        # Extrai multiplicador por várias chaves possíveis
+        # multiplicador: inclui 'multiplicador' (pt-BR)
         mult = (
             item.get("multiplier")
+            or item.get("multiplicador")
             or item.get("mult")
             or item.get("m")
             or item.get("valor")
             or item.get("value")
-            or item.get("x")    # fallback
+            or item.get("x")
         )
 
-        # Extrai data/hora por várias chaves possíveis
-        dt = (
-            item.get("timestamp")
-            or item.get("data")
-            or item.get("date")
-            or item.get("hora")
-            or item.get("time")
-        )
+        # data/hora: alguns endpoints trazem 'date' + 'end' (hora)
+        # tentamos combinar se existir
+        date_part = item.get("datetime") or item.get("timestamp") or item.get("date") or item.get("data")
+        time_part = item.get("time") or item.get("hora") or item.get("end")
+
+        if date_part and time_part and isinstance(date_part, str) and isinstance(time_part, str):
+            dt = f"{date_part} {time_part}"
+        else:
+            dt = date_part or time_part  # o que houver
 
         rows.append({
             "multiplier": mult,
             "datetime": dt,
-            # Keep também alguns campos comuns se existirem
             "round": item.get("round") or item.get("rodada") or item.get("id")
         })
 
     df = pd.DataFrame(rows)
-    # Normaliza coluna de multiplicador para float
+
+    # Normaliza coluna de multiplicador para float e descarta vazios
     if "multiplier" in df.columns:
         df["multiplier"] = pd.to_numeric(df["multiplier"], errors="coerce")
     return df.dropna(subset=["multiplier"])
@@ -124,7 +126,7 @@ def load_df_from_json(url: str) -> pd.DataFrame:
 
 def load_df(csv_path: str, json_url: str) -> pd.DataFrame:
     """
-    Tenta JSON primeiro; se falhar, tenta CSV local.
+    Tenta JSON primeiro; se não vier nada, tenta CSV local.
     """
     # 1) JSON
     if json_url:
@@ -132,39 +134,39 @@ def load_df(csv_path: str, json_url: str) -> pd.DataFrame:
             df = load_df_from_json(json_url)
             if not df.empty:
                 return df
-        except Exception:
-            pass
+        except Exception as e:
+            print("load_df JSON error:", e)
 
     # 2) CSV
     try:
         if csv_path and os.path.exists(csv_path):
             df = pd.read_csv(csv_path)
-            # tentar detectar coluna de multiplicador
+            # detectar coluna de multiplicador (inclui 'multiplicador')
             for c in df.columns:
-                if c.lower() in ("multiplier", "mult", "m", "valor", "value", "x"):
+                if c.lower() in ("multiplier", "multiplicador", "mult", "m", "valor", "value", "x"):
                     df = df.rename(columns={c: "multiplier"})
                     df["multiplier"] = pd.to_numeric(df["multiplier"], errors="coerce")
                     df = df.dropna(subset=["multiplier"])
                     return df
-    except Exception:
-        pass
+    except Exception as e:
+        print("load_df CSV error:", e)
 
-    # Se nada deu, retorna DF vazio
+    # Se nada deu, retorna DF vazio com a coluna esperada
     return pd.DataFrame(columns=["multiplier"])
 
 
 def get_multiplier_series(df: pd.DataFrame) -> pd.Series:
     """
-    Retorna uma Series com os multiplicadores (float).
+    Retorna a Series com os multiplicadores (float).
     """
     if df is None or df.empty:
         return pd.Series(dtype=float)
     if "multiplier" in df.columns:
         s = pd.to_numeric(df["multiplier"], errors="coerce")
         return s.dropna()
-    # fallback: tenta deduzir por nomes
+    # fallback defensivo
     for c in df.columns:
-        if c.lower() in ("multiplier", "mult", "m", "valor", "value", "x"):
+        if c.lower() in ("multiplier", "multiplicador", "mult", "m", "valor", "value", "x"):
             return pd.to_numeric(df[c], errors="coerce").dropna()
     return pd.Series(dtype=float)
 
