@@ -296,7 +296,7 @@ DASH_HTML = """
 <body>
   <header>
     <h1>Aviator Monitor</h1>
-    <div class="muted">Janela: {{window}} • Fonte: {{source}}</div>
+    <div class="muted">Janela: {{window}} • Fonte: {{source_data}}</div>
     <div><a class="btn" href="{{url_for('logout')}}">Sair</a></div>
   </header>
 
@@ -439,7 +439,7 @@ def dashboard():
         freqs=freqs,
         updated_at=updated_at,
         window=WINDOW,
-        source=source,   # (ou 'source', conforme seu template)
+        source_data=source,
         table_html=table_html
     )
 
