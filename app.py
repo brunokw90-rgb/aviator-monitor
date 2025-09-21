@@ -7,7 +7,7 @@ import pandas as pd
 import requests
 from flask import (
     Flask, request, redirect, url_for, session,
-    render_template_string, flash, jsonify
+    render_template, flash, jsonify
 )
 
 # =========================
@@ -27,7 +27,7 @@ WINDOW     = int(os.getenv("FREQ_WINDOW", "500"))
 # =========================
 # Flask
 # =========================
-app = Flask(_name_)
+app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
 
@@ -370,6 +370,6 @@ def api_live():
 # =========================
 # Main (local)
 # =========================
-if _name_ == "_main_":
+if __name__ == "__main__":
     # debug=True só localmente
     app.run(host="0.0.0.0", port=5000, debug=True)
