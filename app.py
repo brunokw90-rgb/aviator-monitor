@@ -385,6 +385,33 @@ def api_live():
         "freqs": freqs,
     })
 
+# =========================
+# Debug helpers (somente para diagnóstico)
+# =========================
+@app.get("/debug/source")
+def dbg_source():
+    return jsonify({
+        "json_url": JSON_URL or None,
+        "csv_path": CSV_PATH or None,
+        "using_json": bool(JSON_URL),
+        "using_csv": bool(CSV_PATH and not JSON_URL),
+        "window": WINDOW,
+    })
+
+@app.get("/debug/sample")
+def dbg_sample():
+    try:
+        df = load_df(CSV_PATH, JSON_URL)
+        # pega até 5 linhas para inspecionar
+        rows = df.head(5).to_dict(orient="records") if not df.empty else []
+        return jsonify({
+            "ok": True,
+            "shape": list(df.shape),
+            "columns": list(df.columns),
+            "rows": rows
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # =========================
 # Main (local)
