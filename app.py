@@ -372,9 +372,7 @@ setInterval(refreshLive, 2000);
 </body>
 </html>
 """
-
 def build_table_html(df: pd.DataFrame) -> str:
-    """Gera a tabela HTML dos últimos 50 registros mais recentes."""
     if df is None or df.empty:
         return "<em>Sem dados</em>"
 
@@ -385,17 +383,17 @@ def build_table_html(df: pd.DataFrame) -> str:
     )
     cols = [c for c in df.columns if c.lower() in preferred] or list(df.columns)
 
-    # Escolhe uma coluna para ordenar (caso exista)
+    # tenta ordenar por alguma coluna temporal/ID
     sort_candidates = ["datetime", "date", "hora", "time", "round", "rodada", "id"]
     sort_col = next((c for c in sort_candidates if c in df.columns), None)
 
     df_view = df
     if sort_col:
-        # Queremos os mais recentes primeiro
         df_view = df.sort_values(by=sort_col, ascending=False)
 
     show = df_view[cols].head(50)
     return show.to_html(index=False, classes="mono")
+
 # =========================
 # Rotas
 # =========================
@@ -427,19 +425,13 @@ def logout():
 @app.route("/")
 @login_required
 def dashboard():
-    # Carrega dados
     df = load_df(CSV_PATH, JSON_URL)
     s = get_multiplier_series(df)
     freqs = compute_freqs(s, window=WINDOW)
     updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Monta tabela com últimas 50 linhas (colunas úteis se existirem)
+    # >>> usar o helper que já ordena e pega os 50 mais recentes
     table_html = build_table_html(df)
-    if not df.empty:
-        preferred = ("multiplier", "mult", "m", "valor", "value", "data", "date", "hora", "time", "round", "rodada", "id")
-        cols = [c for c in df.columns if c.lower() in preferred]
-        show = df[cols].tail(50) if cols else df.tail(50)
-        table_html = show.to_html(index=False, classes="mono")
 
     source = JSON_URL if JSON_URL else CSV_PATH
     return render_template_string(
@@ -447,7 +439,7 @@ def dashboard():
         freqs=freqs,
         updated_at=updated_at,
         window=WINDOW,
-        source_data=source,
+        source_data=source,   # (ou 'source', conforme seu template)
         table_html=table_html
     )
 
