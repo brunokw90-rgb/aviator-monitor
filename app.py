@@ -388,6 +388,10 @@ def api_live():
 # =========================
 # Debug helpers (somente para diagnóstico)
 # =========================
+@app.get("/ping")
+def ping():
+    return "pong", 200
+
 @app.get("/debug/source")
 def dbg_source():
     return jsonify({
@@ -402,7 +406,6 @@ def dbg_source():
 def dbg_sample():
     try:
         df = load_df(CSV_PATH, JSON_URL)
-        # pega até 5 linhas para inspecionar
         rows = df.head(5).to_dict(orient="records") if not df.empty else []
         return jsonify({
             "ok": True,
