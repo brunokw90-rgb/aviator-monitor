@@ -1,162 +1,212 @@
 import os
 import math
-import pandas as pd
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, session, flash
+from functools import wraps
 
-# ======== Config por variáveis de ambiente ========
-CSV_PATH   = os.getenv("CSV_PATH", "audit_out/live_rollup.csv")
-APP_USER   = os.getenv("APP_USER", "admin")
-APP_PASS   = os.getenv("APP_PASS", "admin123")
+import pandas as pd
+import requests
+from flask import (
+    Flask, request, redirect, url_for, session,
+    render_template_string, flash, jsonify
+)
+
+# =========================
+# Config (variáveis de ambiente)
+# =========================
 SECRET_KEY = os.getenv("SECRET_KEY", "change-me")  # troque em produção!
-WINDOW     = int(os.getenv("FREQ_WINDOW", "500"))  # tamanho da janela p/ cálculo das freq
+APP_USER   = os.getenv("USERNAME", os.getenv("APP_USER", "admin"))
+APP_PASS   = os.getenv("PASSWORD", os.getenv("APP_PASS", "admin123"))
 
-# ======== Flask ========
-app = Flask(__name__)
+# Fonte de dados
+JSON_URL   = os.getenv("DASHBOARD_JSON_URL", "").strip()
+CSV_PATH   = os.getenv("CSV_PATH", "audit_out/live_rollup.csv").strip()
+
+# Janela para cálculo de frequências
+WINDOW     = int(os.getenv("FREQ_WINDOW", "500"))
+
+# =========================
+# Flask
+# =========================
+app = Flask(_name_)
 app.secret_key = SECRET_KEY
 
-# ======== Helpers ========
+
+# =========================
+# Helpers de autenticação
+# =========================
 def login_required(view):
+    @wraps(view)
     def wrapper(*args, **kwargs):
         if not session.get("logged_in"):
             return redirect(url_for("login", next=request.path))
         return view(*args, **kwargs)
-    wrapper.__name__ = view.__name__
     return wrapper
 
-import os, requests, pandas as pd
-from flask import Flask, render_template_string
 
-# Variáveis de ambiente
-JSON_URL   = os.getenv("DASHBOARD_JSON_URL")
-WINDOW     = int(os.getenv("FREQ_WINDOW", "500"))
-
-# Flask
-app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "chave_padrao_insegura") 
-
+# =========================
+# Leitura de dados
+# =========================
 def load_df_from_json(url: str) -> pd.DataFrame:
-    try:
-        r = requests.get(url, timeout=10)
-        r.raise_for_status()
-        data = r.json()
+    """
+    Tenta ler dados do endpoint JSON. Aceita formatos:
+    - lista de objetos: [{"multiplier": 1.2, "time": "..."}, ...]
+    - objeto com lista: {"data": [...]} / {"result": [...]} / {"velas": [...]} etc.
+    Normaliza para um DataFrame com as colunas possíveis.
+    """
+    if not url:
+        raise ValueError("JSON_URL vazio")
 
-        # dependendo da API pode ser "resultados" ou lista direta
-        resultados = data.get("resultados") or data.get("historicoResultados") or data
+    r = requests.get(url, timeout=10)
+    r.raise_for_status()
+    data = r.json()
 
-        rows = []
-        for item in resultados:
-            mult = item.get("multiplicador") or item.get("valor") or ""
-            if isinstance(mult, str) and mult.endswith("x"):
-                mult = mult[:-1]
-            try:
-                mult = float(str(mult).replace(",", "."))
-            except:
-                continue
-            rodada = item.get("rodada") or item.get("id")
-            date   = item.get("date") or item.get("data")
-            rows.append({"rodada": rodada, "date": date, "multiplicador": mult})
+    # Extrair a lista
+    if isinstance(data, dict):
+        # tenta chaves comuns
+        for k in ("data", "result", "results", "velas", "candles", "items"):
+            if k in data and isinstance(data[k], list):
+                data = data[k]
+                break
 
-        df = pd.DataFrame(rows)
-        return df.head(WINDOW)
-    except Exception as e:
-        print(f"[load_json] erro: {e}")
-        return pd.DataFrame(columns=["rodada","date","multiplicador"])
+    if not isinstance(data, list):
+        raise ValueError("JSON não está em formato de lista de registros")
 
-def load_df() -> pd.DataFrame:
-    if JSON_URL:
-        return load_df_from_json(JSON_URL)
-    return pd.DataFrame(columns=["rodada","date","multiplicador"])
+    rows = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
 
-def get_multiplier_series(df: pd.DataFrame):
-    if df.empty:
-        return pd.Series(dtype=float)
-    # tenta detectar o nome da coluna do multiplicador
-    for col in ["multiplicador", "valor", "value", "mult"]:
-        if col in df.columns:
-            s = df[col]
-            break
-    else:
-        # nenhuma coluna conhecida encontrada
-        return pd.Series(dtype=float)
+        # Extrai multiplicador por várias chaves possíveis
+        mult = (
+            item.get("multiplier")
+            or item.get("mult")
+            or item.get("m")
+            or item.get("valor")
+            or item.get("value")
+            or item.get("x")    # fallback
+        )
 
-    # Normaliza para float (ex.: "1.43x" -> 1.43)
-    def to_float(x):
-        if isinstance(x, str):
-            x = x.lower().replace("x", "").replace(",", ".").strip()
+        # Extrai data/hora por várias chaves possíveis
+        dt = (
+            item.get("timestamp")
+            or item.get("data")
+            or item.get("date")
+            or item.get("hora")
+            or item.get("time")
+        )
+
+        rows.append({
+            "multiplier": mult,
+            "datetime": dt,
+            # Keep também alguns campos comuns se existirem
+            "round": item.get("round") or item.get("rodada") or item.get("id")
+        })
+
+    df = pd.DataFrame(rows)
+    # Normaliza coluna de multiplicador para float
+    if "multiplier" in df.columns:
+        df["multiplier"] = pd.to_numeric(df["multiplier"], errors="coerce")
+    return df.dropna(subset=["multiplier"])
+
+
+def load_df(csv_path: str, json_url: str) -> pd.DataFrame:
+    """
+    Tenta JSON primeiro; se falhar, tenta CSV local.
+    """
+    # 1) JSON
+    if json_url:
         try:
-            return float(x)
+            df = load_df_from_json(json_url)
+            if not df.empty:
+                return df
         except Exception:
-            return math.nan
+            pass
 
-    s = s.map(to_float)
-    s = s.dropna()
-    return s.astype(float)
+    # 2) CSV
+    try:
+        if csv_path and os.path.exists(csv_path):
+            df = pd.read_csv(csv_path)
+            # tentar detectar coluna de multiplicador
+            for c in df.columns:
+                if c.lower() in ("multiplier", "mult", "m", "valor", "value", "x"):
+                    df = df.rename(columns={c: "multiplier"})
+                    df["multiplier"] = pd.to_numeric(df["multiplier"], errors="coerce")
+                    df = df.dropna(subset=["multiplier"])
+                    return df
+    except Exception:
+        pass
 
-def compute_freqs(s: pd.Series, cuts=(2,5,10,20), window=500):
-    if s.empty:
-        return {c: None for c in cuts}, 0
-    s_window = s.tail(window)
-    total = len(s_window)
-    res = {}
-    for c in cuts:
-        res[c] = round(float((s_window >= c).mean())*100, 2) if total else None
-    return res, total
+    # Se nada deu, retorna DF vazio
+    return pd.DataFrame(columns=["multiplier"])
 
-# ======== Rotas ========
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        u = request.form.get("username", "")
-        p = request.form.get("password", "")
-        if u == APP_USER and p == APP_PASS:
-            session["logged_in"] = True
-            return redirect(request.args.get("next") or url_for("dashboard"))
-        return render_template_string(LOGIN_HTML, error="Credenciais inválidas.")
-    return render_template_string(LOGIN_HTML, error=None)
 
-@app.route("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("login"))
+def get_multiplier_series(df: pd.DataFrame) -> pd.Series:
+    """
+    Retorna uma Series com os multiplicadores (float).
+    """
+    if df is None or df.empty:
+        return pd.Series(dtype=float)
+    if "multiplier" in df.columns:
+        s = pd.to_numeric(df["multiplier"], errors="coerce")
+        return s.dropna()
+    # fallback: tenta deduzir por nomes
+    for c in df.columns:
+        if c.lower() in ("multiplier", "mult", "m", "valor", "value", "x"):
+            return pd.to_numeric(df[c], errors="coerce").dropna()
+    return pd.Series(dtype=float)
 
-@app.route("/")
-@login_required
-def dashboard():
-    df = load_df(CSV_PATH)
-    s = get_multiplier_series(df)
-    freqs, total = compute_freqs(s, window=WINDOW)
-    last_val = s.iloc[-1] if len(s) else None
-    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # tabela com últimos 50 registros pra inspecionar
-    last_rows = None
-    if not df.empty:
-        show_cols = [c for c in df.columns if c.lower() in ("multiplicador","valor","value","mult","data","date","hora","time","rodada","id","round")]
-        last_rows = df[show_cols].tail(50) if show_cols else df.tail(50)
+def compute_freqs(series: pd.Series, window: int = 500) -> dict:
+    """
+    Calcula frequências e estatísticas básicas para cortes 2x, 5x, 10x, 20x
+    na janela mais recente (window).
+    """
+    if series is None or series.empty:
+        return {
+            "window": 0,
+            "n": 0,
+            "cuts": {},
+            "mean": None,
+            "std": None,
+            "min": None,
+            "p50": None,
+            "p90": None,
+            "p99": None,
+        }
 
-    return render_template_string(DASH_HTML,
-        freqs=freqs, total=total, last_val=last_val,
-        csv_path=CSV_PATH, updated_at=updated_at,
-        window=WINDOW, table_html=(last_rows.to_html(index=False) if isinstance(last_rows, pd.DataFrame) else "<em>Sem dados</em>")
-    )
+    s = series.dropna()
+    if window and len(s) > window:
+        s = s.iloc[-window:]
 
-@app.route("/api/live")
-@login_required
-def api_live():
-    df = load_df(CSV_PATH)
-    s = get_multiplier_series(df)
-    freqs, total = compute_freqs(s, window=WINDOW)
-    last_val = s.iloc[-1] if len(s) else None
-    return jsonify({
-        "csv_path": CSV_PATH,
-        "window": WINDOW,
-        "total_in_window": total,
-        "last_multiplier": last_val,
-        "freq_percent_ge": {f"{k}x": v for k, v in freqs.items()}
-    })
+    def pct(th):
+        if len(s) == 0:
+            return 0.0
+        return round((s >= th).mean() * 100, 2)
 
-# ======== Templates (inline) ========
+    cuts = {
+        "2x":  pct(2.0),
+        "5x":  pct(5.0),
+        "10x": pct(10.0),
+        "20x": pct(20.0),
+    }
+
+    stats = {
+        "window": int(window if window and len(series) >= window else len(s)),
+        "n": int(len(s)),
+        "cuts": cuts,
+        "mean": round(s.mean(), 4) if len(s) else None,
+        "std":  round(s.std(ddof=1), 4) if len(s) > 1 else None,
+        "min":  float(s.min()) if len(s) else None,
+        "p50":  float(s.quantile(0.5)) if len(s) else None,
+        "p90":  float(s.quantile(0.9)) if len(s) else None,
+        "p99":  float(s.quantile(0.99)) if len(s) else None,
+    }
+    return stats
+
+
+# =========================
+# Templates inline
+# =========================
 LOGIN_HTML = """
 <!doctype html>
 <html lang="pt-br">
@@ -165,7 +215,7 @@ LOGIN_HTML = """
   <title>Login • Aviator Monitor</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;background:#0b1220;color:#eaeef5;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;background:#0b1220;color:#e5eeff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
     .card{background:#111a2e;padding:32px;border-radius:14px;box-shadow:0 10px 30px rgba(0,0,0,.35);width:320px}
     h1{margin:0 0 16px 0;font-size:20px}
     label{display:block;margin:10px 0 6px 0;font-size:13px;color:#b6c2e2}
@@ -197,98 +247,129 @@ DASH_HTML = """
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     :root{--bg:#0b1220;--panel:#0f1a31;--muted:#9fb0d3;--hi:#22c55e;--warn:#f59e0b;--danger:#ef4444;--card:#111d38}
-    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;background:var(--bg);color:#eaeef5;margin:0;padding:24px}
-    .wrap{max-width:1100px;margin:0 auto}
-    header{display:flex;align-items:center;gap:12px;justify-content:space-between}
-    .pill{background:var(--panel);padding:8px 12px;border-radius:999px;color:var(--muted);font-size:12px}
-    .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-top:16px}
-    .kpi{background:var(--card);border-radius:12px;padding:16px}
-    .kpi h3{margin:0;font-size:14px;color:var(--muted)}
-    .kpi .v{font-size:28px;font-weight:800;margin-top:8px}
-    .kpi .v.ok{color:var(--hi)} .kpi .v.mid{color:var(--warn)} .kpi .v.bad{color:var(--danger)}
-    .panel{background:var(--panel);padding:16px;border-radius:12px;margin-top:18px}
-    table{width:100%;border-collapse:collapse;font-size:13px}
-    th,td{padding:8px;border-bottom:1px solid rgba(255,255,255,.06)}
-    th{color:#b6c2e2;text-align:left}
-    a, a:visited{color:#93c5fd}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial,sans-serif;background:var(--bg);color:#eaf1ff;margin:0}
+    header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:var(--panel);position:sticky;top:0}
+    .wrap{max-width:1000px;margin:20px auto;padding:0 16px}
+    h1{font-size:18px;margin:0}
+    .grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;margin-top:16px}
+    .card{background:var(--card);padding:14px;border-radius:10px}
+    .muted{color:var(--muted);font-size:12px}
+    .big{font-size:24px;font-weight:700}
+    .ok{color:var(--hi)} .warn{color:var(--warn)} .bad{color:var(--danger)}
+    table{width:100%;border-collapse:collapse;margin-top:18px}
+    th,td{border-bottom:1px solid #223055;padding:8px;text-align:left;font-size:13px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,"Courier New",monospace}
+    .pill{font-size:12px;padding:4px 8px;border-radius:999px;background:#223055;color:#cfe1ff}
+    .btn{background:#334155;border:0;color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer;text-decoration:none}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <div>
-        <h1 style="margin:0;font-size:22px">Aviator Monitor</h1>
-        <div class="pill">CSV: {{csv_path}} • janela={{window}} • atual: {{updated_at}}</div>
-      </div>
-      <div><a href="{{ url_for('logout') }}">Sair</a></div>
-    </header>
+  <header>
+    <h1>Aviator Monitor</h1>
+    <div class="muted">Janela: {{window}} • Fonte: {{source}}</div>
+    <div><a class="btn" href="{{url_for('logout')}}">Sair</a></div>
+  </header>
 
+  <div class="wrap">
     <div class="grid">
-      <div class="kpi">
-        <h3>Último multiplicador</h3>
-        <div class="v">{{ '—' if last_val is none else ('%.2fx' % last_val) }}</div>
-      </div>
-      {% for c,label in [(2,'≥ 2x'),(5,'≥ 5x'),(10,'≥ 10x'),(20,'≥ 20x')] %}
-      <div class="kpi">
-        <h3>{{label}} (janela {{total}})</h3>
-        {% set p = freqs.get(c) %}
-        {% set cls = 'ok' if p is not none and p>=20 else ('mid' if p is not none and p>=10 else 'bad') %}
-        <div class="v {{cls}}">{{ '—' if p is none else ('%.2f%%' % p) }}</div>
-      </div>
-      {% endfor %}
+      <div class="card"><div class="muted">Total (n)</div><div class="big">{{freqs.n}}</div></div>
+      <div class="card"><div class="muted">Média</div><div class="big mono">{{freqs.mean}}</div></div>
+      <div class="card"><div class="muted">Desvio</div><div class="big mono">{{freqs.std}}</div></div>
+      <div class="card"><div class="muted">P90</div><div class="big mono">{{freqs.p90}}</div></div>
     </div>
 
-    <div class="panel">
-      <h3 style="margin-top:0;color:#b6c2e2">Últimos registros</h3>
-      {{ table_html | safe }}
+    <div class="grid" style="margin-top:12px">
+      <div class="card"><div class="muted">≥ 2x</div><div class="big ok">{{freqs.cuts["2x"]}}%</div></div>
+      <div class="card"><div class="muted">≥ 5x</div><div class="big warn">{{freqs.cuts["5x"]}}%</div></div>
+      <div class="card"><div class="muted">≥ 10x</div><div class="big warn">{{freqs.cuts["10x"]}}%</div></div>
+      <div class="card"><div class="muted">≥ 20x</div><div class="big bad">{{freqs.cuts["20x"]}}%</div></div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="muted">Atualizado em</div>
+      <div class="mono">{{updated_at}}</div>
+      <div class="muted" style="margin-top:8px">Últimos 50 registros</div>
+      <div>{{table_html | safe}}</div>
     </div>
   </div>
 </body>
 </html>
 """
 
-if __name__ == "__main__":
-    # Para rodar local: python app.py
-    port = int(os.getenv("PORT", "5000"))
-    app.run(host="0.0.0.0", port=port, debug=True)
 
-# Usuário e senha vindos das variáveis de ambiente
-USERNAME = os.environ.get("USERNAME", "admin")
-PASSWORD = os.environ.get("PASSWORD", "admin")
-
-@app.route("/")
-def home():
-    return "Aviator Monitor está rodando 🚀"
-
+# =========================
+# Rotas
+# =========================
 @app.get("/health")
 def health():
     return "ok", 200
 
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    error = None
     if request.method == "POST":
-        usuario = request.form.get("username")
-        senha = request.form.get("password")
+        u = request.form.get("username", "")
+        p = request.form.get("password", "")
+        if u == APP_USER and p == APP_PASS:
+            session["logged_in"] = True
+            return redirect(request.args.get("next") or url_for("dashboard"))
+        error = "Usuário ou senha inválidos."
+    return render_template_string(LOGIN_HTML, error=error)
 
-        if usuario == USERNAME and senha == PASSWORD:
-            session["user"] = usuario
-            flash("Login realizado com sucesso!", "success")
-            return redirect(url_for("index"))
-        else:
-            flash("Usuário ou senha inválidos. Tente novamente.", "danger")
-            return redirect(url_for("login"))
-
-    return render_template("login.html")
-
-@app.route("/")
-def index():
-    if "user" in session:
-        return f"Bem-vindo, {session['user']}!"
-    else:
-        return redirect(url_for("login"))
 
 @app.route("/logout")
 def logout():
-    session.pop("user", None)
+    session.clear()
     flash("Você saiu da sessão.", "info")
     return redirect(url_for("login"))
+
+
+@app.route("/")
+@login_required
+def dashboard():
+    # Carrega dados
+    df = load_df(CSV_PATH, JSON_URL)
+    s = get_multiplier_series(df)
+    freqs = compute_freqs(s, window=WINDOW)
+    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Monta tabela com últimas 50 linhas (colunas úteis se existirem)
+    table_html = "<em>Sem dados</em>"
+    if not df.empty:
+        preferred = ("multiplier", "mult", "m", "valor", "value", "data", "date", "hora", "time", "round", "rodada", "id")
+        cols = [c for c in df.columns if c.lower() in preferred]
+        show = df[cols].tail(50) if cols else df.tail(50)
+        table_html = show.to_html(index=False, classes="mono")
+
+    source = JSON_URL if JSON_URL else CSV_PATH
+    return render_template_string(
+        DASH_HTML,
+        freqs=freqs,
+        updated_at=updated_at,
+        window=WINDOW,
+        source=source,
+        table_html=table_html
+    )
+
+
+@app.get("/api/live")
+@login_required
+def api_live():
+    df = load_df(CSV_PATH, JSON_URL)
+    s = get_multiplier_series(df)
+    freqs = compute_freqs(s, window=WINDOW)
+    return jsonify({
+        "ok": True,
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "window": WINDOW,
+        "freqs": freqs,
+    })
+
+
+# =========================
+# Main (local)
+# =========================
+if _name_ == "_main_":
+    # debug=True só localmente
+    app.run(host="0.0.0.0", port=5000, debug=True)
