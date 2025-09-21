@@ -374,15 +374,28 @@ setInterval(refreshLive, 2000);
 """
 
 def build_table_html(df: pd.DataFrame) -> str:
-    """Gera a tabela HTML dos últimos 60 registros."""
+    """Gera a tabela HTML dos últimos 50 registros mais recentes."""
     if df is None or df.empty:
         return "<em>Sem dados</em>"
-    preferred = ("multiplier", "mult", "m", "valor", "value", "x",
-                 "data", "date", "hora", "time", "round", "rodada", "id")
-    cols = [c for c in df.columns if c.lower() in preferred]
-    show = df[cols].tail(50) if cols else df.tail(50)
-    return show.to_html(index=False, classes="mono")
 
+    preferred = (
+        "multiplier", "mult", "m", "valor", "value", "x",
+        "datetime", "data", "date", "hora", "time",
+        "round", "rodada", "id"
+    )
+    cols = [c for c in df.columns if c.lower() in preferred] or list(df.columns)
+
+    # Escolhe uma coluna para ordenar (caso exista)
+    sort_candidates = ["datetime", "date", "hora", "time", "round", "rodada", "id"]
+    sort_col = next((c for c in sort_candidates if c in df.columns), None)
+
+    df_view = df
+    if sort_col:
+        # Queremos os mais recentes primeiro
+        df_view = df.sort_values(by=sort_col, ascending=False)
+
+    show = df_view[cols].head(50)
+    return show.to_html(index=False, classes="mono")
 # =========================
 # Rotas
 # =========================
