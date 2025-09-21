@@ -413,6 +413,22 @@ def dbg_sample():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
+@app.get("/debug/raw")
+def dbg_raw():
+    if not JSON_URL:
+        return jsonify({"ok": False, "error": "JSON_URL vazio"}), 400
+    try:
+        r = requests.get(JSON_URL, timeout=15)
+        info = {
+            "status_code": r.status_code,
+            "headers_content_type": r.headers.get("Content-Type"),
+            "text_prefix": r.text[:1000],   # primeiras 1000 chars p/ inspeção
+            "length": len(r.text),
+        }
+        return jsonify({"ok": True, "info": info})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 # =========================
 # Main (local)
 # =========================
