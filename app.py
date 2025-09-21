@@ -32,7 +32,7 @@ JSON_URL   = os.getenv("DASHBOARD_JSON_URL")
 WINDOW     = int(os.getenv("FREQ_WINDOW", "500"))
 
 # Flask
-app = Flask(_name_)
+app = Flask(__name__)
 
 def load_df_from_json(url: str) -> pd.DataFrame:
     try:
@@ -254,3 +254,7 @@ if __name__ == "__main__":
 @app.route("/")
 def home():
     return "Aviator Monitor está rodando 🚀"
+
+@app.get("/health")
+def health():
+    return "ok", 200
