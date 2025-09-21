@@ -2,7 +2,7 @@ import os
 import math
 import pandas as pd
 from datetime import datetime
-from flask import Flask, request, redirect, url_for, session, render_template_string, jsonify, abort
+from flask import Flask, render_template, request, redirect, url_for, session, flash
 
 # ======== Config por variáveis de ambiente ========
 CSV_PATH   = os.getenv("CSV_PATH", "audit_out/live_rollup.csv")
@@ -33,6 +33,7 @@ WINDOW     = int(os.getenv("FREQ_WINDOW", "500"))
 
 # Flask
 app = Flask(__name__)
+app.secret_key = os.environ.get("SECRET_KEY", "chave_padrao_insegura") 
 
 def load_df_from_json(url: str) -> pd.DataFrame:
     try:
@@ -251,6 +252,10 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=True)
 
+# Usuário e senha vindos das variáveis de ambiente
+USERNAME = os.environ.get("USERNAME", "admin")
+PASSWORD = os.environ.get("PASSWORD", "admin")
+
 @app.route("/")
 def home():
     return "Aviator Monitor está rodando 🚀"
@@ -258,3 +263,32 @@ def home():
 @app.get("/health")
 def health():
     return "ok", 200
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        usuario = request.form.get("username")
+        senha = request.form.get("password")
+
+        if usuario == USERNAME and senha == PASSWORD:
+            session["user"] = usuario
+            flash("Login realizado com sucesso!", "success")
+            return redirect(url_for("index"))
+        else:
+            flash("Usuário ou senha inválidos. Tente novamente.", "danger")
+            return redirect(url_for("login"))
+
+    return render_template("login.html")
+
+@app.route("/")
+def index():
+    if "user" in session:
+        return f"Bem-vindo, {session['user']}!"
+    else:
+        return redirect(url_for("login"))
+
+@app.route("/logout")
+def logout():
+    session.pop("user", None)
+    flash("Você saiu da sessão.", "info")
+    return redirect(url_for("login"))
