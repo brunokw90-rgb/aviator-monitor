@@ -439,7 +439,7 @@ def dashboard():
         freqs=freqs,
         updated_at=updated_at,
         window=WINDOW,
-        source_data=source,   # (ou 'source', conforme seu template)
+        source=source,   # (ou 'source', conforme seu template)
         table_html=table_html
     )
 
