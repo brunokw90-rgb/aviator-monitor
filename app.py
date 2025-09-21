@@ -272,7 +272,6 @@ DASH_HTML = """
 <!doctype html>
 <html lang="pt-br">
 <head>
-  <meta http-equiv="refresh" content="10">
   <meta charset="utf-8">
   <title>Aviator Monitor</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -303,66 +302,72 @@ DASH_HTML = """
 
   <div class="wrap">
     <div class="grid">
-      <div class="card"><div class="muted">Total (n)</div><div class="big">{{freqs.n}}</div></div>
-      <div class="card"><div class="muted">Média</div><div class="big mono">{{freqs.mean}}</div></div>
-      <div class="card"><div class="muted">Desvio</div><div class="big mono">{{freqs.std}}</div></div>
-      <div class="card"><div class="muted">P90</div><div class="big mono">{{freqs.p90}}</div></div>
+      <div class="card"><div class="muted">Total (n)</div><div class="big" id="n">{{freqs.n}}</div></div>
+      <div class="card"><div class="muted">Média</div><div class="big mono" id="mean">{{freqs.mean}}</div></div>
+      <div class="card"><div class="muted">Desvio</div><div class="big mono" id="std">{{freqs.std}}</div></div>
+      <div class="card"><div class="muted">P90</div><div class="big mono" id="p90">{{freqs.p90}}</div></div>
     </div>
 
     <div class="grid" style="margin-top:12px">
-      <div class="card"><div class="muted">≥ 2x</div><div class="big ok">{{freqs.cuts["2x"]}}%</div></div>
-      <div class="card"><div class="muted">≥ 5x</div><div class="big warn">{{freqs.cuts["5x"]}}%</div></div>
-      <div class="card"><div class="muted">≥ 10x</div><div class="big warn">{{freqs.cuts["10x"]}}%</div></div>
-      <div class="card"><div class="muted">≥ 20x</div><div class="big bad">{{freqs.cuts["20x"]}}%</div></div>
+      <div class="card"><div class="muted">≥ 2x</div><div class="big ok" id="ge2">{{freqs.cuts["2x"]}}%</div></div>
+      <div class="card"><div class="muted">≥ 5x</div><div class="big warn" id="ge5">{{freqs.cuts["5x"]}}%</div></div>
+      <div class="card"><div class="muted">≥ 10x</div><div class="big warn" id="ge10">{{freqs.cuts["10x"]}}%</div></div>
+      <div class="card"><div class="muted">≥ 20x</div><div class="big bad" id="ge20">{{freqs.cuts["20x"]}}%</div></div>
     </div>
 
     <div class="card" style="margin-top:12px">
       <div class="muted">Atualizado em</div>
-      <div class="mono">{{updated_at}}</div>
+      <div class="mono" id="updated_at">{{updated_at}}</div>
       <div class="muted" style="margin-top:8px">Últimos 50 registros</div>
-      <div>{{table_html | safe}}</div>
+      <div id="k_table">{{table_html | safe}}</div>
     </div>
   </div>
+
 <script>
-async function refreshLive() {
-  try {
-    const r = await fetch('/api/live', { cache: 'no-store' });
+const $ = id => document.getElementById(id);
+const fmtNum = v => (v == null || v === '') ? '—' : Number(v).toFixed(4);
+const fmtPct = v => {
+  if (v == null || v === '') return '—';
+  const n = Number(v);
+  if (isNaN(n)) return '—';
+  // Se vier 0–1 (fração), converte; se já vier em % (ex. 54.1), mantém
+  const perc = n <= 1 ? n * 100 : n;
+  return perc.toFixed(2) + '%';
+};
+
+async function refreshLive(){
+  try{
+    const r = await fetch('/api/live', {cache:'no-store'});
+    if(!r.ok) return;
     const j = await r.json();
-    console.log('live:', j);
-    if (!j.ok) return;
-
-    // Ajuste estes IDs para os que você usa nos cards.
-    // Eu estou supondo nomes como: n, mean, std, p90, ge2, ge5, ge10, ge20
-    // (veja o objeto j.freqs no console e mapeie as chaves).
+    if(!j.ok) return;
     const f = j.freqs || {};
+    const cuts = f.cuts || {};
 
-    setText('n',      f.n);
-    setText('mean',   round(f.mean));
-    setText('std',    round(f.std));
-    setText('p90',    round(f.p90));
-    setText('ge2',    pct(f.ge_2x));
-    setText('ge5',    pct(f.ge_5x));
-    setText('ge10',   pct(f.ge_10x));
-    setText('ge20',   pct(f.ge_20x));
+    if ($('n'))    $('n').textContent    = f.n ?? '0';
+    if ($('mean')) $('mean').textContent = fmtNum(f.mean);
+    if ($('std'))  $('std').textContent  = fmtNum(f.std);
+    if ($('p90'))  $('p90').textContent  = fmtNum(f.p90);
 
-    // Atualiza o carimbo “Atualizado em”
-    const upd = document.getElementById('updated_at');
-    if (upd) upd.textContent = new Date().toLocaleString();
-  } catch (e) {
-    console.error(e);
+    if ($('ge2'))  $('ge2').textContent  = fmtPct(cuts["2x"]);
+    if ($('ge5'))  $('ge5').textContent  = fmtPct(cuts["5x"]);
+    if ($('ge10')) $('ge10').textContent = fmtPct(cuts["10x"]);
+    if ($('ge20')) $('ge20').textContent = fmtPct(cuts["20x"]);
+
+    if ($('updated_at')) $('updated_at').textContent = new Date().toLocaleString();
+
+    // Se você quiser, pode fazer o back devolver table_html no /api/live`
+    // e atualizar aqui:
+    // if (j.table_html && $('k_table')) $('k_table').innerHTML = j.table_html;
+
+  }catch(e){
+    // silencioso
   }
 }
 
-function setText(id, v) {
-  const el = document.getElementById(id);
-  if (el != null && v != null) el.textContent = v;
-}
-function round(x) { return (x == null) ? '' : Number(x).toFixed(4); }
-function pct(x)   { return (x == null) ? '' : (Number(x) * 100).toFixed(2) + '%'; }
-
-// roda agora e a cada 10s
+// primeira atualização imediata e depois a cada 2s
 refreshLive();
-setInterval(refreshLive, 10000);
+setInterval(refreshLive, 2000);
 </script>
 </body>
 </html>
