@@ -12,7 +12,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "change-me")  # troque em produção!
 WINDOW     = int(os.getenv("FREQ_WINDOW", "500"))  # tamanho da janela p/ cálculo das freq
 
 # ======== Flask ========
-app = Flask(_name_)
+app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
 # ======== Helpers ========
@@ -21,7 +21,7 @@ def login_required(view):
         if not session.get("logged_in"):
             return redirect(url_for("login", next=request.path))
         return view(*args, **kwargs)
-    wrapper._name_ = view._name_
+    wrapper.__name__ = view.__name__
     return wrapper
 
 def load_df(csv_path: str) -> pd.DataFrame:
