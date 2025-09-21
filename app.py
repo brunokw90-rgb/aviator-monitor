@@ -319,7 +319,7 @@ DASH_HTML = """
       <div class="muted">Atualizado em</div>
       <div class="mono" id="updated_at">{{updated_at}}</div>
       <div class="muted" style="margin-top:8px">Últimos 50 registros</div>
-      <div id="k_table">{{table_html | safe}}</div>
+      <div id="table_html">{{table_html | safe}}</div>
     </div>
   </div>
 
@@ -373,6 +373,15 @@ setInterval(refreshLive, 2000);
 </html>
 """
 
+def build_table_html(df: pd.DataFrame) -> str:
+    """Gera a tabela HTML dos últimos 60 registros."""
+    if df is None or df.empty:
+        return "<em>Sem dados</em>"
+    preferred = ("multiplier", "mult", "m", "valor", "value", "x",
+                 "data", "date", "hora", "time", "round", "rodada", "id")
+    cols = [c for c in df.columns if c.lower() in preferred]
+    show = df[cols].tail(50) if cols else df.tail(50)
+    return show.to_html(index=False, classes="mono")
 
 # =========================
 # Rotas
@@ -412,7 +421,7 @@ def dashboard():
     updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Monta tabela com últimas 50 linhas (colunas úteis se existirem)
-    table_html = "<em>Sem dados</em>"
+    table_html = build_table_html(df)
     if not df.empty:
         preferred = ("multiplier", "mult", "m", "valor", "value", "data", "date", "hora", "time", "round", "rodada", "id")
         cols = [c for c in df.columns if c.lower() in preferred]
@@ -444,6 +453,7 @@ def api_live():
         "updated_at": datetime.now().isoformat(timespec="seconds"),
         "window": WINDOW,
         "freqs": freqs,
+        "table_html": build_table_html(df),
     })
 
 # =========================
