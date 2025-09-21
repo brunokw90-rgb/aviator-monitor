@@ -52,6 +52,13 @@ except Exception:
 app = Flask(__name__)
 app.config["SECRET_KEY"] = SECRET_KEY
 
+@app.after_request
+def no_cache(resp):
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    resp.headers["Pragma"] = "no-cache"
+    resp.headers["Expires"] = "0"
+    return resp
+
 # log simples para debug (remova em produção)
 print("FLASK SECRET_KEY set?", bool(app.config.get("SECRET_KEY")))
 print("Using JSON_URL?" , bool(JSON_URL), "| CSV_PATH:", CSV_PATH)
@@ -265,6 +272,7 @@ DASH_HTML = """
 <!doctype html>
 <html lang="pt-br">
 <head>
+  <meta http-equiv="refresh" content="10">
   <meta charset="utf-8">
   <title>Aviator Monitor</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -315,6 +323,47 @@ DASH_HTML = """
       <div>{{table_html | safe}}</div>
     </div>
   </div>
+<script>
+async function refreshLive() {
+  try {
+    const r = await fetch('/api/live', { cache: 'no-store' });
+    const j = await r.json();
+    console.log('live:', j);
+    if (!j.ok) return;
+
+    // Ajuste estes IDs para os que você usa nos cards.
+    // Eu estou supondo nomes como: n, mean, std, p90, ge2, ge5, ge10, ge20
+    // (veja o objeto j.freqs no console e mapeie as chaves).
+    const f = j.freqs || {};
+
+    setText('n',      f.n);
+    setText('mean',   round(f.mean));
+    setText('std',    round(f.std));
+    setText('p90',    round(f.p90));
+    setText('ge2',    pct(f.ge_2x));
+    setText('ge5',    pct(f.ge_5x));
+    setText('ge10',   pct(f.ge_10x));
+    setText('ge20',   pct(f.ge_20x));
+
+    // Atualiza o carimbo “Atualizado em”
+    const upd = document.getElementById('updated_at');
+    if (upd) upd.textContent = new Date().toLocaleString();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+function setText(id, v) {
+  const el = document.getElementById(id);
+  if (el != null && v != null) el.textContent = v;
+}
+function round(x) { return (x == null) ? '' : Number(x).toFixed(4); }
+function pct(x)   { return (x == null) ? '' : (Number(x) * 100).toFixed(2) + '%'; }
+
+// roda agora e a cada 10s
+refreshLive();
+setInterval(refreshLive, 10000);
+</script>
 </body>
 </html>
 """
