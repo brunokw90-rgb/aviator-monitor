@@ -370,6 +370,9 @@ def dashboard():
 @login_required
 def api_live():
     df = load_df(CSV_PATH, JSON_URL)
+    print("DEBUG CSV_PATH:", CSV_PATH)
+    print("DEBUG JSON_URL:", JSON_URL)
+    print("DEBUG df size:", len(df))
     s = get_multiplier_series(df)
     freqs = compute_freqs(s, window=WINDOW)
     return jsonify({
