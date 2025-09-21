@@ -24,15 +24,48 @@ def login_required(view):
     wrapper.__name__ = view.__name__
     return wrapper
 
-def load_df(csv_path: str) -> pd.DataFrame:
-    if not os.path.exists(csv_path):
-        return pd.DataFrame()
+import os, requests, pandas as pd
+from flask import Flask, render_template_string
+
+# Variáveis de ambiente
+JSON_URL   = os.getenv("DASHBOARD_JSON_URL")
+WINDOW     = int(os.getenv("FREQ_WINDOW", "500"))
+
+# Flask
+app = Flask(_name_)
+
+def load_df_from_json(url: str) -> pd.DataFrame:
     try:
-        df = pd.read_csv(csv_path)
-    except Exception:
-        # tenta com separador ; se vier assim
-        df = pd.read_csv(csv_path, sep=";")
-    return df
+        r = requests.get(url, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+
+        # dependendo da API pode ser "resultados" ou lista direta
+        resultados = data.get("resultados") or data.get("historicoResultados") or data
+
+        rows = []
+        for item in resultados:
+            mult = item.get("multiplicador") or item.get("valor") or ""
+            if isinstance(mult, str) and mult.endswith("x"):
+                mult = mult[:-1]
+            try:
+                mult = float(str(mult).replace(",", "."))
+            except:
+                continue
+            rodada = item.get("rodada") or item.get("id")
+            date   = item.get("date") or item.get("data")
+            rows.append({"rodada": rodada, "date": date, "multiplicador": mult})
+
+        df = pd.DataFrame(rows)
+        return df.head(WINDOW)
+    except Exception as e:
+        print(f"[load_json] erro: {e}")
+        return pd.DataFrame(columns=["rodada","date","multiplicador"])
+
+def load_df() -> pd.DataFrame:
+    if JSON_URL:
+        return load_df_from_json(JSON_URL)
+    return pd.DataFrame(columns=["rodada","date","multiplicador"])
 
 def get_multiplier_series(df: pd.DataFrame):
     if df.empty:
