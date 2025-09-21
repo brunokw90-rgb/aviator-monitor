@@ -1,0 +1,2 @@
+[console_scripts]
+random-audit = random_audit.cli:main

@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>Random Audit - Relatório</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html,body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;margin:0;padding:0;color:#111;background:#fff}
+    .wrap{max-width:980px;margin:32px auto;padding:0 16px}
+    h1{font-size:28px;margin:0 0 16px}
+    h2{font-size:20px;margin:24px 0 8px;border-bottom:1px solid #eee;padding-bottom:6px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    .kv{background:#fafafa;border:1px solid #eee;border-radius:8px;padding:12px}
+    .muted{color:#666}
+    img{max-width:100%;height:auto;border:1px solid #eee;border-radius:6px}
+    .small{font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Random Audit - Relatório</h1>
+
+    <div class="grid">
+  <div class="kv">
+    <div><b>Métricas básicas</b></div>
+    <div>n: 271317</div>
+    <div>média:
+      
+        21.994023
+      
+    </div>
+    <div>mediana:
+      
+        1.930000
+      
+    </div>
+    <div>desvio padrão:
+      
+        4824.970778
+      
+    </div>
+    <div>min:
+      
+        1.000000
+      
+    </div>
+    <div>max:
+      
+        2478941.450000
+      
+    </div>
+  </div>
+
+  <div class="kv">
+    <div><b>Assimetria (skewness):</b>
+       — 
+    </div>
+    <div><b>Curtose (excesso):</b>
+       — 
+    </div>
+    <div><b>Entropia (bits):</b>
+      
+        0.001567
+      
+    </div>
+  </div>
+</div>
+
+      <div class="kv">
+  <div><b>Assimetria (skewness):</b>
+    
+      501.575023
+    
+  </div>
+
+  <div><b>Curtose (excesso):</b>
+    
+      256928.670424
+    
+  </div>
+
+  <div><b>Entropia (bits):</b>
+    
+      0.001567
+    
+  </div>
+</div>
+
+    <h2>Testes de distribuição</h2>
+    <div class="grid">
+      <div class="kv">
+        <div><b>Qui-quadrado (uniforme)</b></div>
+        <div>bins: 60</div>
+        <div>χ²: 16006983.010615 |
+             gl: 59 |
+             p-valor: 0</div>
+      </div>
+      <div class="kv">
+        <div><b>Kolmogorov–Smirnov (min–max &rarr; U[0,1])</b></div>
+        <div><b>Kolmogorov-Smirnov (min-max → U[0,1])</b></div>
+
+  <div class="muted small">Sem resultado KS</div>
+
+
+      <div class="kv">
+        <div><b>Jarque–Bera (normalidade)</b></div>
+        
+          <div>JB: 5854387120.398882 |
+               p-valor: 0</div>
+          <div>skewness: 501.575023 |
+               kurtosis: 256928.670424</div>
+        
+      </div>
+
+    <h2>Ordenação / Dependência</h2>
+    <div class="grid">
+      <div class="kv">
+        <div><b>Runs (Wald–Wolfowitz)</b></div>
+        <div>corte: median</div>
+        <div>runs: 135555 |
+             acima: 135647 |
+             abaixo: 134976</div>
+        <div>z: 0.935514 |
+             p-valor: 0.349524</div>
+      </div>
+      <div class="kv">
+        <div><b>ACF</b></div>
+        <div class="small">IC aprox.: ± 0.004</div>
+        
+          <img src="audit_out\plots\acf.png" alt="ACF">
+        
+      </div>
+    </div>
+
+      <div class="kv">
+        <div><b>Runs up-and-down (monotonia)</b></div>
+        
+          <div>runs: 180625 |
+               subidas: 134675 |
+               descidas: 135352</div>
+          <div>z: 175.550814 |
+               p-valor: 0</div>
+        
+      </div>
+
+    <div class="kv">
+        <div><b>Ljung–Box</b></div>
+        
+          <div>lags (m): 24</div>
+          <div>Q: 0.000972 |
+               gl: 24 |
+               p-valor: 1</div>
+        
+      </div>
+
+    <div class="kv">
+  <div><b>BDS (dependência não-linear)</b></div>
+
+  
+    <table class="small" style="border-collapse:collapse;width:100%">
+      <tr>
+        <th style="text-align:left;padding:4px;border-bottom:1px solid #eee">dimensão</th>
+        <th style="text-align:right;padding:4px;border-bottom:1px solid #eee">Z</th>
+        <th style="text-align:right;padding:4px;border-bottom:1px solid #eee">p-valor</th>
+        <th style="text-align:right;padding:4px;border-bottom:1px solid #eee">eps</th>
+      </tr>
+      
+      <tr>
+        <td style="text-align:left;padding:4px;border-bottom:1px solid #f3f3f3">m=2</td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          -1.099745
+        </td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          0.271443
+        </td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          3377.479544
+        </td>
+      </tr>
+      
+      <tr>
+        <td style="text-align:left;padding:4px;border-bottom:1px solid #f3f3f3">m=3</td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          -0.428513
+        </td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          0.668278
+        </td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          3377.479544
+        </td>
+      </tr>
+      
+      <tr>
+        <td style="text-align:left;padding:4px;border-bottom:1px solid #f3f3f3">m=4</td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          -0.484626
+        </td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          0.627942
+        </td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          3377.479544
+        </td>
+      </tr>
+      
+      <tr>
+        <td style="text-align:left;padding:4px;border-bottom:1px solid #f3f3f3">m=5</td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          -0.377632
+        </td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          0.705704
+        </td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          3377.479544
+        </td>
+      </tr>
+      
+    </table>
+
+    
+      <div style="margin-top:8px">
+        <img src="audit_out\plots\bds.png" alt="BDS Z vs m" style="max-width:100%">
+      </div>
+    
+
+  
+</div>
+
+    <p class="muted small" style="margin-top:24px">
+      Gerado automaticamente por random_audit · 2025-09-20 16:16:07
+    </p>
+  </div>
+</body>
+</html>

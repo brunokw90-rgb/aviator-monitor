@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <title>Random Audit - Relatório</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html,body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;margin:0;padding:0;color:#111;background:#fff}
+    .wrap{max-width:980px;margin:32px auto;padding:0 16px}
+    h1{font-size:28px;margin:0 0 16px}
+    h2{font-size:20px;margin:24px 0 8px;border-bottom:1px solid #eee;padding-bottom:6px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    .kv{background:#fafafa;border:1px solid #eee;border-radius:8px;padding:12px}
+    .muted{color:#666}
+    img{max-width:100%;height:auto;border:1px solid #eee;border-radius:6px}
+    .small{font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Random Audit - Relatório</h1>
+
+    <div class="grid">
+  <div class="kv">
+    <div><b>Métricas básicas</b></div>
+    <div>n: {{ m.basic.n }}</div>
+    <div>média:
+      {% if m.basic.mean is defined and m.basic.mean is not none %}
+        {{ '%.6f'|format(m.basic.mean) }}
+      {% else %} — {% endif %}
+    </div>
+    <div>mediana:
+      {% if m.basic.median is defined and m.basic.median is not none %}
+        {{ '%.6f'|format(m.basic.median) }}
+      {% else %} — {% endif %}
+    </div>
+    <div>desvio padrão:
+      {% if m.basic.std is defined and m.basic.std is not none %}
+        {{ '%.6f'|format(m.basic.std) }}
+      {% else %} — {% endif %}
+    </div>
+    <div>min:
+      {% if m.basic.min is defined and m.basic.min is not none %}
+        {{ '%.6f'|format(m.basic.min) }}
+      {% else %} — {% endif %}
+    </div>
+    <div>max:
+      {% if m.basic.max is defined and m.basic.max is not none %}
+        {{ '%.6f'|format(m.basic.max) }}
+      {% else %} — {% endif %}
+    </div>
+  </div>
+
+  <div class="kv">
+    <div><b>Assimetria (skewness):</b>
+      {% if m.basic.skewness is defined and m.basic.skewness is not none %}
+        {{ '%.6f'|format(m.basic.skewness) }}
+      {% else %} — {% endif %}
+    </div>
+    <div><b>Curtose (excesso):</b>
+      {% if m.basic.kurtosis is defined and m.basic.kurtosis is not none %}
+        {{ '%.6f'|format(m.basic.kurtosis) }}
+      {% else %} — {% endif %}
+    </div>
+    <div><b>Entropia (bits):</b>
+      {% if m.basic.entropy is defined and m.basic.entropy is not none %}
+        {{ '%.6f'|format(m.basic.entropy) }}
+      {% else %} — {% endif %}
+    </div>
+  </div>
+</div>
+
+      <div class="kv">
+  <div><b>Assimetria (skewness):</b>
+    {% if m.basic is defined and m.basic and m.basic.skewness is defined and m.basic.skewness is not none %}
+      {{ '%.6f'|format(m.basic.skewness) }}
+    {% elif m.jarque_bera is defined and m.jarque_bera and m.jarque_bera.skewness is defined and m.jarque_bera.skewness is not none %}
+      {{ '%.6f'|format(m.jarque_bera.skewness) }}
+    {% else %} — {% endif %}
+  </div>
+
+  <div><b>Curtose (excesso):</b>
+    {% if m.basic is defined and m.basic and m.basic.kurtosis is defined and m.basic.kurtosis is not none %}
+      {{ '%.6f'|format(m.basic.kurtosis) }}
+    {% elif m.jarque_bera is defined and m.jarque_bera and m.jarque_bera.kurtosis is defined and m.jarque_bera.kurtosis is not none %}
+      {{ '%.6f'|format(m.jarque_bera.kurtosis) }}
+    {% else %} — {% endif %}
+  </div>
+
+  <div><b>Entropia (bits):</b>
+    {% if m.basic is defined and m.basic and m.basic.entropy is defined and m.basic.entropy is not none %}
+      {{ '%.6f'|format(m.basic.entropy) }}
+    {% else %} — {% endif %}
+  </div>
+</div>
+
+    <h2>Testes de distribuição</h2>
+    <div class="grid">
+      <div class="kv">
+        <div><b>Qui-quadrado (uniforme)</b></div>
+        <div>bins: {{ m.chi_square_uniform.bins }}</div>
+        <div>χ²: {{ '%.6f'|format(m.chi_square_uniform.statistic) }} |
+             gl: {{ m.chi_square_uniform.dof }} |
+             p-valor: {{ '%.6g'|format(m.chi_square_uniform.pvalue) }}</div>
+      </div>
+      <div class="kv">
+        <div><b>Kolmogorov–Smirnov (min–max &rarr; U[0,1])</b></div>
+        <div><b>Kolmogorov-Smirnov (min-max → U[0,1])</b></div>
+{% if m.ks_uniform is defined and m.ks_uniform %}
+  <div>
+    D: {{ '%.6f'|format(m.ks_uniform.statistic) if m.ks_uniform.statistic is defined else '—' }} |
+    p-valor: {{ '%.6g'|format(m.ks_uniform.pvalue) if m.ks_uniform.pvalue is defined else '—' }}
+  </div>
+  {% if m.ks_uniform.note is defined %}
+    <div class="muted small">{{ m.ks_uniform.note }}</div>
+  {% endif %}
+{% else %}
+  <div class="muted small">Sem resultado KS</div>
+{% endif %}
+
+      <div class="kv">
+        <div><b>Jarque–Bera (normalidade)</b></div>
+        {% if m.jarque_bera %}
+          <div>JB: {{ '%.6f'|format(m.jarque_bera.JB) }} |
+               p-valor: {{ '%.6g'|format(m.jarque_bera.pvalue) }}</div>
+          <div>skewness: {{ '%.6f'|format(m.jarque_bera.skewness) }} |
+               kurtosis: {{ '%.6f'|format(m.jarque_bera.kurtosis) }}</div>
+        {% else %}
+          <div class="muted small">Sem Jarque–Bera</div>
+        {% endif %}
+      </div>
+
+    <h2>Ordenação / Dependência</h2>
+    <div class="grid">
+      <div class="kv">
+        <div><b>Runs (Wald–Wolfowitz)</b></div>
+        <div>corte: {{ m.runs_test.cut }}</div>
+        <div>runs: {{ m.runs_test.runs }} |
+             acima: {{ m.runs_test.n_above }} |
+             abaixo: {{ m.runs_test.n_below }}</div>
+        <div>z: {{ '%.6f'|format(m.runs_test.z) }} |
+             p-valor: {{ '%.6g'|format(m.runs_test.pvalue) }}</div>
+      </div>
+      <div class="kv">
+        <div><b>ACF</b></div>
+        <div class="small">IC aprox.: ± {{ '%.3f'|format(m.acf.ci_approx) }}</div>
+        {% if m.plots and m.plots.acf %}
+          <img src="{{ m.plots.acf }}" alt="ACF">
+        {% else %}
+          <div class="muted small">Sem gráfico ACF</div>
+        {% endif %}
+      </div>
+    </div>
+
+      <div class="kv">
+        <div><b>Runs up-and-down (monotonia)</b></div>
+        {% if m.runs_up_down %}
+          <div>runs: {{ m.runs_up_down.runs }} |
+               subidas: {{ m.runs_up_down.n_up }} |
+               descidas: {{ m.runs_up_down.n_down }}</div>
+          <div>z: {{ '%.6f'|format(m.runs_up_down.z) }} |
+               p-valor: {{ '%.6g'|format(m.runs_up_down.pvalue) }}</div>
+        {% else %}
+          <div class="muted small">Sem runs up-and-down</div>
+        {% endif %}
+      </div>
+
+    <div class="kv">
+        <div><b>Ljung–Box</b></div>
+        {% if m.ljung_box %}
+          <div>lags (m): {{ m.ljung_box.lags }}</div>
+          <div>Q: {{ '%.6f'|format(m.ljung_box.Q) }} |
+               gl: {{ m.ljung_box.dof }} |
+               p-valor: {{ '%.6g'|format(m.ljung_box.pvalue) }}</div>
+        {% else %}
+          <div class="muted small">Sem Ljung–Box</div>
+        {% endif %}
+      </div>
+
+    <div class="kv">
+  <div><b>BDS (dependência não-linear)</b></div>
+
+  {% if m.bds %}
+    <table class="small" style="border-collapse:collapse;width:100%">
+      <tr>
+        <th style="text-align:left;padding:4px;border-bottom:1px solid #eee">dimensão</th>
+        <th style="text-align:right;padding:4px;border-bottom:1px solid #eee">Z</th>
+        <th style="text-align:right;padding:4px;border-bottom:1px solid #eee">p-valor</th>
+        <th style="text-align:right;padding:4px;border-bottom:1px solid #eee">eps</th>
+      </tr>
+      {% for key, b in m.bds|dictsort %}
+      <tr>
+        <td style="text-align:left;padding:4px;border-bottom:1px solid #f3f3f3">{{ key }}</td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          {% if b.stat is defined %}{{ '%.6f'|format(b.stat) }}{% endif %}
+        </td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          {% if b.pvalue is defined %}{{ '%.6f'|format(b.pvalue) }}{% endif %}
+        </td>
+        <td style="text-align:right;padding:4px;border-bottom:1px solid #f3f3f3">
+          {% if b.eps is defined %}{{ '%.6f'|format(b.eps) }}{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+
+    {% if m.plots and m.plots.bds %}
+      <div style="margin-top:8px">
+        <img src="{{ m.plots.bds }}" alt="BDS Z vs m" style="max-width:100%">
+      </div>
+    {% else %}
+      <div class="muted small">Sem gráfico BDS</div>
+    {% endif %}
+
+  {% else %}
+    <div class="muted small">Sem BDS</div>
+  {% endif %}
+</div>
+
+    <p class="muted small" style="margin-top:24px">
+      Gerado automaticamente por random_audit · {{ now }}
+    </p>
+  </div>
+</body>
+</html>

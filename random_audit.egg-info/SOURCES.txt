@@ -1,0 +1,6 @@
+setup.py
+random_audit.egg-info/PKG-INFO
+random_audit.egg-info/SOURCES.txt
+random_audit.egg-info/dependency_links.txt
+random_audit.egg-info/entry_points.txt
+random_audit.egg-info/top_level.txt
