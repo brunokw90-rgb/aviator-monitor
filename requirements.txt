@@ -4,3 +4,7 @@ scipy
 matplotlib
 jinja2
 orjson
+flask
+pandas
+gunicorn
+psycopg2
