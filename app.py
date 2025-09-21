@@ -337,9 +337,6 @@ def logout():
     flash("Você saiu da sessão.", "info")
     return redirect(url_for("login"))
 
-@app.get("/health")
-def health():
-    return "OK", 200
 
 @app.route("/")
 @login_required
