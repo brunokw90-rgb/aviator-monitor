@@ -324,6 +324,8 @@ DASH_HTML = """
   </div>
 
 <script>
+const t = document.getElementById('table_html');
+  if (t && j.table_html) t.innerHTML = j.table_html;   // <-- atualiza a tabela
 const $ = id => document.getElementById(id);
 const fmtNum = v => (v == null || v === '') ? '—' : Number(v).toFixed(4);
 const fmtPct = v => {
@@ -448,9 +450,6 @@ def dashboard():
 @login_required
 def api_live():
     df = load_df(CSV_PATH, JSON_URL)
-    print("DEBUG CSV_PATH:", CSV_PATH)
-    print("DEBUG JSON_URL:", JSON_URL)
-    print("DEBUG df size:", len(df))
     s = get_multiplier_series(df)
     freqs = compute_freqs(s, window=WINDOW)
     return jsonify({
@@ -458,7 +457,7 @@ def api_live():
         "updated_at": datetime.now().isoformat(timespec="seconds"),
         "window": WINDOW,
         "freqs": freqs,
-        "table_html": build_table_html(df),
+        "table_html": build_table_html(df),  # <-- ADICIONE/CONFIRME ISTO
     })
 
 # =========================
