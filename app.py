@@ -668,3 +668,5 @@ def dbg_db_url():
             "path": p.path,               # /postgres
             "query": p.query,             # sslmode=require
         }, 200
+    except Exception as e:
+        return {"ok": False, "error": repr(e)}, 200
