@@ -302,27 +302,50 @@ DASH_HTML = """
 
   <div class="wrap">
     <div class="grid">
-      <div class="card"><div class="muted">Total (n)</div><div class="big" id="n">{{freqs.n}}</div></div>
-      <div class="card"><div class="muted">Média</div><div class="big mono" id="mean">{{freqs.mean}}</div></div>
-      <div class="card"><div class="muted">Desvio</div><div class="big mono" id="std">{{freqs.std}}</div></div>
-      <div class="card"><div class="muted">P90</div><div class="big mono" id="p90">{{freqs.p90}}</div></div>
-    </div>
+  <div class="card">
+    <div class="muted">Total (n)</div>
+    <div class="big" id="n">{{ freqs.n }}</div>
+  </div>
+  <div class="card">
+    <div class="muted">Média</div>
+    <div class="big mono" id="mean">{{ freqs.mean }}</div>
+  </div>
+  <div class="card">
+    <div class="muted">Desvio</div>
+    <div class="big mono" id="std">{{ freqs.std }}</div>
+  </div>
+  <div class="card">
+    <div class="muted">P90</div>
+    <div class="big mono" id="p90">{{ freqs.p90 }}</div>
+  </div>
+</div>
 
-    <div class="grid" style="margin-top:12px">
-      <div class="card"><div class="muted">≥ 2x</div><div class="big ok" id="ge2">{{freqs.cuts["2x"]}}%</div></div>
-      <div class="card"><div class="muted">≥ 5x</div><div class="big warn" id="ge5">{{freqs.cuts["5x"]}}%</div></div>
-      <div class="card"><div class="muted">≥ 10x</div><div class="big warn" id="ge10">{{freqs.cuts["10x"]}}%</div></div>
-      <div class="card"><div class="muted">≥ 20x</div><div class="big bad" id="ge20">{{freqs.cuts["20x"]}}%</div></div>
-    </div>
+<div class="grid" style="margin-top:12px">
+  <div class="card">
+    <div class="muted">≥ 2x</div>
+    <div class="big ok" id="ge2">{{ freqs.cuts["2x"] }}%</div>
+  </div>
+  <div class="card">
+    <div class="muted">≥ 5x</div>
+    <div class="big warn" id="ge5">{{ freqs.cuts["5x"] }}%</div>
+  </div>
+  <div class="card">
+    <div class="muted">≥ 10x</div>
+    <div class="big warn" id="ge10">{{ freqs.cuts["10x"] }}%</div>
+  </div>
+  <div class="card">
+    <div class="muted">≥ 20x</div>
+    <div class="big bad" id="ge20">{{ freqs.cuts["20x"] }}%</div>
+  </div>
+</div>
 
-    <div class="card" style="margin-top:12px">
-      <div class="muted">Atualizado em</div>
-      <div class="mono" id="updated_at">{{updated_at}}</div>
+<div class="card" style="margin-top:12px">
+  <div class="muted">Atualizado em</div>
+  <div class="mono" id="updated_at">{{ updated_at }}</div>
 
-      <div class="muted" style="margin-top:8px">Últimos 50 registros</div>
-      <!-- Contêiner onde o JS vai injetar a tabela -->
-      <div id="table_wrap">{{ table_html | safe }}</div>
-    </div>
+  <div class="muted" style="margin-top:8px">Últimos 50 registros</div>
+  <div id="table_wrap">{{ table_html | safe }}</div>
+</div>
   </div>
 
 <script>
@@ -340,6 +363,13 @@ const fmtPct = v => {
 };
 
 <script>
+function setText(id, v) {
+  const el = document.getElementById(id);
+  if (el != null && v != null) el.textContent = v;
+}
+function fmt4(x){ return (x==null||isNaN(x)) ? '' : Number(x).toFixed(4); }
+function pct(x){ return (x==null||isNaN(x)) ? '' : (Number(x).toFixed(2) + '%'); }
+
 async function refreshLive() {
   try {
     const r = await fetch('/api/live', { cache: 'no-store' });
@@ -347,27 +377,30 @@ async function refreshLive() {
     if (!j.ok) return;
 
     const f = j.freqs || {};
-    setText('n', f.n);
-    setText('mean', Number(f.mean).toFixed(4));
-    setText('std', Number(f.std).toFixed(4));
-    setText('p90', Number(f.p90).toFixed(4));
-    setText('ge2', (f.cuts?.["2x"] ?? f.ge_2x) + '%');
-    setText('ge5', (f.cuts?.["5x"] ?? f.ge_5x) + '%');
-    setText('ge10', (f.cuts?.["10x"] ?? f.ge_10x) + '%');
-    setText('ge20', (f.cuts?.["20x"] ?? f.ge_20x) + '%');
+    const cuts = f.cuts || {};
 
-    // Atualiza a TABELA
+    setText('n', f.n);
+    setText('mean', fmt4(f.mean));
+    setText('std', fmt4(f.std));
+    setText('p90', fmt4(f.p90));
+    setText('ge2',  pct(cuts["2x"] ?? f.ge_2x));
+    setText('ge5',  pct(cuts["5x"] ?? f.ge_5x));
+    setText('ge10', pct(cuts["10x"] ?? f.ge_10x));
+    setText('ge20', pct(cuts["20x"] ?? f.ge_20x));
+
+    // Atualiza a tabela
     const wrap = document.getElementById('table_wrap');
     if (wrap && j.table_html) wrap.innerHTML = j.table_html;
 
-    // Atualiza o carimbo de horário
+    // Carimbo de horário
     const upd = document.getElementById('updated_at');
     if (upd) upd.textContent = new Date().toLocaleString();
   } catch (e) {
-    console.error(e);
+    console.error('refreshLive error:', e);
   }
 }
-function setText(id, v){ const el=document.getElementById(id); if(el!=null && v!=null) el.textContent=v; }
+
+// primeira atualização e depois a cada 2s
 refreshLive();
 setInterval(refreshLive, 2000);
 </script>
