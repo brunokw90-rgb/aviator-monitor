@@ -54,8 +54,10 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 def _db_url() -> str:
     url = os.getenv("DATABASE_URL")
     if url:
-        if "+psycopg" not in url and "+psycopg2" not in url:
+        # Força psycopg2 (não psycopg3)
+        if "+psycopg2" not in url:
             url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+            url = url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
         
         # Forçar IPv4 e melhorar conectividade
         if "?" in url:
