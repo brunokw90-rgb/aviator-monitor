@@ -75,15 +75,19 @@ from sqlalchemy.sql import func
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 def _db_url() -> str:
-    """
-    Retorna a URL de conexão do banco (DATABASE_URL).
-    """
-    if not DATABASE_URL:
-        raise RuntimeError("Variável DATABASE_URL ausente. Defina no Render ou Supabase.")
-    return DATABASE_URL
+    url = os.getenv("DATABASE_URL")
+    if url:
+        if "+psycopg" not in url and "+psycopg2" not in url:
+            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        return url
 
-_engine: Engine | None = None
-_metadata = MetaData()
+    # fallback por partes
+    if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
+        raise RuntimeError("Defina DATABASE_URL ou todas as variáveis do banco.")
+    return (
+        f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}"
+        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode={DB_SSLMODE}"
+    )
 
 # Tabela central para persistir os resultados
 multipliers = Table(
