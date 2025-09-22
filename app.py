@@ -29,41 +29,15 @@ APP_PASS = os.getenv("PASSWORD", os.getenv("APP_PASS", "admin123"))
 JSON_URL = os.getenv("DASHBOARD_JSON_URL", "").strip()
 CSV_PATH = os.getenv("CSV_PATH", "audit_out/live_rollup.csv").strip()
 
-# Janela (tamanho do “rollup” para métricas)
+# Janela (tamanho do "rollup" para métricas)
 WINDOW = int(os.getenv("FREQ_WINDOW", "500"))
 
 import sys
 print(f"🐍 Python version being used: {sys.version}")
 
 # =========================
-# Conexão SQLAlchemy
-# =========================
-from sqlalchemy import create_engine, MetaData
-
-# cria a engine usando a função _db_url
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.engine import Engine
-from sqlalchemy.sql import func
-
-def get_engine() -> Engine:
-    url = _db_url()
-    engine = create_engine(url, pool_pre_ping=True, future=True)
-    return engine
-
-# metadata global (usado para criar tabelas etc.)
-metadata = MetaData()
-
-# exemplo de engine já inicializada
-try:
-    engine = get_engine()
-    print("[DB] Conexão criada com sucesso:", engine.url)
-except Exception as e:
-    print("[DB] Erro ao conectar:", e)
-
-# =========================
 # Database (Postgres via SQLAlchemy)
 # =========================
-import os
 from sqlalchemy import (
     create_engine, MetaData, Table, Column,
     BigInteger, Numeric, Text, DateTime, UniqueConstraint, Index
@@ -81,21 +55,34 @@ def _db_url() -> str:
     url = os.getenv("DATABASE_URL")
     if url:
         if "+psycopg" not in url and "+psycopg2" not in url:
-            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+            url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
         return url
 
-    # fallback por partes
+    # fallback por partes (se precisar)
+    DB_HOST = os.getenv("DB_HOST")
+    DB_PORT = os.getenv("DB_PORT", "5432")
+    DB_NAME = os.getenv("DB_NAME")
+    DB_USER = os.getenv("DB_USER")
+    DB_PASSWORD = os.getenv("DB_PASSWORD")
+    DB_SSLMODE = os.getenv("DB_SSLMODE", "require")
+    
     if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
         raise RuntimeError("Defina DATABASE_URL ou todas as variáveis do banco.")
     return (
-        f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}"
+        f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}"
         f"@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode={DB_SSLMODE}"
     )
+
+# Variável global para engine
+_engine = None
+
+# metadata global (usado para criar tabelas etc.)
+metadata = MetaData()
 
 # Tabela central para persistir os resultados
 multipliers = Table(
     "multipliers",
-    _metadata,
+    metadata,  # CORRIGIDO: era _metadata
     Column("id", BigInteger, primary_key=True, autoincrement=True),
     Column("round", BigInteger, nullable=True),
     Column("multiplier", Numeric(20, 8), nullable=False),
@@ -110,7 +97,7 @@ def db_engine() -> Engine:
     global _engine
     if _engine is None:
         _engine = create_engine(_db_url(), pool_pre_ping=True, pool_size=5, max_overflow=5)
-        _metadata.create_all(_engine)
+        metadata.create_all(_engine)
     return _engine
 
 def save_rows(rows: list[dict], source: str | None = None) -> int:
@@ -139,7 +126,7 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
 
 # Teste de conexão ao carregar o módulo
 try:
-    engine = get_engine()
+    engine = db_engine()
     print("[DB] Conexão criada com sucesso:", engine.url)
 except Exception as e:
     print("[DB] Erro ao conectar:", e)
@@ -226,7 +213,6 @@ def load_df_from_json(url: str) -> pd.DataFrame:
     if "multiplier" in df.columns:
         df["multiplier"] = pd.to_numeric(df["multiplier"], errors="coerce")
     return df.dropna(subset=["multiplier"])
-    return df
 
 
 def load_df(csv_path: str, json_url: str) -> pd.DataFrame:
@@ -658,67 +644,9 @@ def dbg_db_url():
         return {
             "ok": True,
             "vars": flags,
-            "scheme": p.scheme,           # deve ser "postgresql+psycopg"
+            "scheme": p.scheme,           # deve ser "postgresql+psycopg2"
             "username": p.username,       # ex.: postgres.<project-ref>
             "hostname": p.hostname,       # ESPERADO: aws-1-sa-east-1.pooler.supabase.com
             "port": p.port,               # 5432
             "path": p.path,               # /postgres
-            "query": p.query,             # sslmode=require
-        }, 200
-    except Exception as e:
-        return {"ok": False, "error": repr(e)}, 200
-
-
-# --- DEBUG: testa conexão real ao banco
-@app.get("/debug/db_ping")
-def dbg_db_ping():
-    try:
-        import os, psycopg
-        url = os.getenv("DATABASE_URL", "").strip()
-        if not url:
-            return {"ok": False, "error": "DATABASE_URL ausente"}, 200
-
-        with psycopg.connect(url, connect_timeout=4) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-                one = cur.fetchone()
-        return {"ok": True, "result": int(one[0])}, 200
-    except Exception as e:
-        # Não explode: devolve o erro para debug
-        return {"ok": False, "error": str(e)}, 200
-
-@app.get("/db/count")
-def db_count():
-    try:
-        eng = db_engine()
-        with eng.connect() as c:
-            n = c.exec_driver_sql("SELECT count(*) FROM multipliers").scalar()
-        return {"ok": True, "count": int(n)}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
-
-@app.get("/db/last")
-def db_last():
-    try:
-        eng = db_engine()
-        with eng.connect() as c:
-            rows = c.exec_driver_sql("""
-                SELECT round, multiplier, datetime, source
-                FROM multipliers
-                ORDER BY datetime DESC
-                LIMIT 10
-            """).mappings().all()
-        return {"ok": True, "rows": list(rows)}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
-
-@app.route("/favicon.ico")
-def favicon():
-    return ("", 204)
-
-# =========================
-# Main (local)
-# =========================
-if __name__ == "__main__":
-    # debug=True só localmente
-    app.run(host="0.0.0.0", port=5000, debug=True)
+            "query": p.query,             # ssl
