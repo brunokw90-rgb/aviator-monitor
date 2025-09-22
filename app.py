@@ -33,8 +33,30 @@ CSV_PATH = os.getenv("CSV_PATH", "audit_out/live_rollup.csv").strip()
 WINDOW = int(os.getenv("FREQ_WINDOW", "500"))
 
 # =========================
+# Conexão SQLAlchemy
+# =========================
+from sqlalchemy import create_engine, MetaData
+
+# cria a engine usando a função _db_url
+def get_engine() -> Engine:
+    url = _db_url()
+    engine = create_engine(url, pool_pre_ping=True, future=True)
+    return engine
+
+# metadata global (usado para criar tabelas etc.)
+metadata = MetaData()
+
+# exemplo de engine já inicializada
+try:
+    engine = get_engine()
+    print("[DB] Conexão criada com sucesso:", engine.url)
+except Exception as e:
+    print("[DB] Erro ao conectar:", e)
+
+# =========================
 # Database (Postgres via SQLAlchemy)
 # =========================
+import os
 from sqlalchemy import (
     create_engine, MetaData, Table, Column,
     BigInteger, Numeric, Text, DateTime, UniqueConstraint, Index
@@ -43,18 +65,34 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
 from sqlalchemy.sql import func
 
+# =========================
+# Config Banco de Dados
+# =========================
 DB_HOST = os.getenv("DB_HOST")
 DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_SSLMODE = os.getenv("DB_SSLMODE", "require")  # Supabase pede sslmode=require
 
 def _db_url() -> str:
+    """
+    Retorna a URL de conexão do banco.
+    - Se DATABASE_URL estiver setada, usa ela direto.
+    - Caso contrário, monta com DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD.
+    """
+    url = os.getenv("DATABASE_URL")
+    if url:
+        return url  # já inclui sslmode normalmente no Supabase
+    
     if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
-        raise RuntimeError("Variáveis do banco ausentes. Defina DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD.")
+        raise RuntimeError(
+            "Variáveis do banco ausentes. "
+            "Defina DATABASE_URL ou DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD."
+        )
     return (
         f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}"
-        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode={DB_SSLMODE}"
     )
 
 _engine: Engine | None = None
@@ -638,6 +676,10 @@ def db_last():
         return {"ok": True, "rows": list(rows)}
     except Exception as e:
         return {"ok": False, "error": str(e)}, 500
+
+@app.route("/favicon.ico")
+def favicon():
+    return ("", 204)
 
 # =========================
 # Main (local)
