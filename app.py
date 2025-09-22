@@ -627,15 +627,62 @@ def dbg_sample():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-@app.get("/db/ping")
-def db_ping():
+# --- DEBUG: inspeciona a URL do banco sem vazar senha
+@app.get("/debug/db_url")
+def dbg_db_url():
     try:
-        eng = db_engine()
-        with eng.connect() as c:
-            one = c.exec_driver_sql("SELECT 1").scalar()
-        return {"ok": True, "one": one}
+        import os
+        from urllib.parse import urlsplit
+
+        raw = os.getenv("DATABASE_URL", "")
+        raw = raw.strip() if raw else ""
+
+        # Mostra quais variáveis existem (sem valores)
+        flags = {
+            "has_DATABASE_URL": bool(raw),
+            "has_DB_HOST": bool(os.getenv("DB_HOST")),
+            "has_DB_PORT": bool(os.getenv("DB_PORT")),
+            "has_DB_NAME": bool(os.getenv("DB_NAME")),
+            "has_DB_USER": bool(os.getenv("DB_USER")),
+            "has_DB_PASSWORD": bool(os.getenv("DB_PASSWORD")),
+        }
+
+        if not raw:
+            return {"ok": False, "error": "DATABASE_URL ausente", "vars": flags}, 200
+
+        p = urlsplit(raw)
+        # Nunca devolva senha
+        return {
+            "ok": True,
+            "vars": flags,
+            "scheme": p.scheme,           # deve ser "postgresql+psycopg"
+            "username": p.username,       # ex.: postgres.<project-ref>
+            "hostname": p.hostname,       # ESPERADO: aws-1-sa-east-1.pooler.supabase.com
+            "port": p.port,               # 5432
+            "path": p.path,               # /postgres
+            "query": p.query,             # sslmode=require
+        }, 200
     except Exception as e:
-        return {"ok": False, "error": str(e)}, 500
+        return {"ok": False, "error": repr(e)}, 200
+
+
+# --- DEBUG: testa conexão real ao banco
+@app.get("/debug/db_ping")
+def dbg_db_ping():
+    try:
+        import os, psycopg
+        url = os.getenv("DATABASE_URL", "").strip()
+        if not url:
+            return {"ok": False, "error": "DATABASE_URL ausente"}, 200
+
+        with psycopg.connect(url, connect_timeout=4) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                one = cur.fetchone()
+        return {"ok": True, "result": int(one[0])}, 200
+    except Exception as e:
+        # Não explode: devolve o erro para debug
+        return {"ok": False, "error": str(e)}, 200
 
 @app.get("/db/count")
 def db_count():
