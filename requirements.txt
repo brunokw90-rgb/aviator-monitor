@@ -5,4 +5,4 @@ pandas==2.2.3
 python-dateutil==2.9.0.post0
 orjson==3.10.7
 SQLAlchemy==1.4.53
-psycopg2-binary==2.9.9
+psycopg==3.2.1

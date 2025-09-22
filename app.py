@@ -54,10 +54,9 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 def _db_url() -> str:
     url = os.getenv("DATABASE_URL")
     if url:
-        # Força psycopg2 (não psycopg3)
-        if "+psycopg2" not in url:
-            url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
-            url = url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+        # Força psycopg (versão 3) que funciona com Python 3.13
+        if "+psycopg" not in url:
+            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
         
         # Forçar IPv4 e melhorar conectividade
         if "?" in url:
@@ -78,7 +77,7 @@ def _db_url() -> str:
     if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
         raise RuntimeError("Defina DATABASE_URL ou todas as variáveis do banco.")
     return (
-        f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}"
+        f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}"
         f"@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode={DB_SSLMODE}&target_session_attrs=read-write&keepalives_idle=600&connect_timeout=10"
     )
 
