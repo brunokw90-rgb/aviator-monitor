@@ -56,6 +56,13 @@ def _db_url() -> str:
     if url:
         if "+psycopg" not in url and "+psycopg2" not in url:
             url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        
+        # Forçar IPv4 e melhorar conectividade
+        if "?" in url:
+            url += "&target_session_attrs=read-write&keepalives_idle=600&connect_timeout=10"
+        else:
+            url += "?sslmode=require&target_session_attrs=read-write&keepalives_idle=600&connect_timeout=10"
+            
         return url
 
     # fallback por partes (se precisar)
@@ -70,7 +77,7 @@ def _db_url() -> str:
         raise RuntimeError("Defina DATABASE_URL ou todas as variáveis do banco.")
     return (
         f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}"
-        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode={DB_SSLMODE}"
+        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode={DB_SSLMODE}&target_session_attrs=read-write&keepalives_idle=600&connect_timeout=10"
     )
 
 # Variável global para engine
@@ -96,7 +103,17 @@ multipliers = Table(
 def db_engine() -> Engine:
     global _engine
     if _engine is None:
-        _engine = create_engine(_db_url(), pool_pre_ping=True, pool_size=5, max_overflow=5)
+        _engine = create_engine(
+            _db_url(), 
+            pool_pre_ping=True, 
+            pool_size=5, 
+            max_overflow=5,
+            connect_args={
+                "connect_timeout": 10,
+                "server_settings": {"application_name": "aviator_monitor"},
+                "options": "-c default_transaction_isolation=read_committed"
+            }
+        )
         metadata.create_all(_engine)
     return _engine
 
