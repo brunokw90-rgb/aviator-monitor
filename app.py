@@ -73,7 +73,7 @@ DB_PORT = os.getenv("DB_PORT", "5432")
 DB_NAME = os.getenv("DB_NAME")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_SSLMODE = os.getenv("DB_SSLMODE", "require")  # Supabase pede sslmode=require
+DB_SSLMODE = os.getenv("DB_SSLMODE", "require")  # Supabase geralmente pede sslmode=require
 
 def _db_url() -> str:
     """
@@ -83,7 +83,8 @@ def _db_url() -> str:
     """
     url = os.getenv("DATABASE_URL")
     if url:
-        return url  # já inclui sslmode normalmente no Supabase
+        # Supabase já entrega completa, só garantir que usa psycopg2
+        return url.replace("postgres://", "postgresql+psycopg2://")
     
     if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
         raise RuntimeError(
@@ -108,53 +109,57 @@ multipliers = Table(
     Column("datetime", DateTime(timezone=True), server_default=func.now()),
     Column("source", Text, nullable=True),
     Column("raw", Text, nullable=True),                # JSON bruto como string se quiser
-    # regra de unicidade por round (quando existir): evita duplicar a mesma rodada
     UniqueConstraint("round", name="uq_multipliers_round"),
-    # índice para consultas por data
     Index("ix_multipliers_datetime", "datetime"),
 )
 
-def db_engine() -> Engine:
+def get_engine() -> Engine:
     global _engine
     if _engine is None:
-        _engine = create_engine(_db_url(), pool_pre_ping=True, pool_size=5, max_overflow=5)
-        # cria a tabela se não existir
-        _metadata.create_all(_engine)
+        _engine = create_engine(
+            _db_url(),
+            pool_pre_ping=True,
+            pool_size=5,
+            max_overflow=5
+        )
+        _metadata.create_all(_engine)  # cria tabela se não existir
     return _engine
 
 def save_rows(rows: list[dict], source: str | None = None) -> int:
     """
     Insere linhas no banco. Cada item de rows deve ter, no mínimo:
       {"multiplier": <float>, "round": <int|null>, "datetime": <datetime|string|null>}
-    Faz UPSERT por 'round' quando round vier preenchido (do-nothing se já existir).
-    Retorna quantas foram efetivamente inseridas.
+    Faz UPSERT por 'round' quando round vier preenchido.
     """
     if not rows:
         return 0
 
-    # anexa 'source' se vier
     if source:
         for r in rows:
             r.setdefault("source", source)
 
-    eng = db_engine()
+    eng = get_engine()
     inserted = 0
 
     with eng.begin() as conn:
-        # tenta usar upsert por 'round' quando houver round na maioria das linhas
         has_round = any(r.get("round") is not None for r in rows)
         if has_round:
             stmt = pg_insert(multipliers).values(rows)
             stmt = stmt.on_conflict_do_nothing(index_elements=["round"])
             result = conn.execute(stmt)
-            # em do_nothing o rowcount pode ser -1 dependendo do driver; contamos manualmente:
             inserted = result.rowcount if result.rowcount and result.rowcount > 0 else 0
         else:
-            # sem 'round', apenas append (pode gerar duplicatas)
             result = conn.execute(multipliers.insert(), rows)
             inserted = result.rowcount or 0
 
     return inserted
+
+# Teste de conexão ao carregar o módulo
+try:
+    engine = get_engine()
+    print("[DB] Conexão criada com sucesso:", engine.url)
+except Exception as e:
+    print("[DB] Erro ao conectar:", e)
 
 # =========================
 # Flask
