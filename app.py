@@ -38,6 +38,10 @@ WINDOW = int(os.getenv("FREQ_WINDOW", "500"))
 from sqlalchemy import create_engine, MetaData
 
 # cria a engine usando a função _db_url
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import Engine
+from sqlalchemy.sql import func
+
 def get_engine() -> Engine:
     url = _db_url()
     engine = create_engine(url, pool_pre_ping=True, future=True)
@@ -61,9 +65,6 @@ from sqlalchemy import (
     create_engine, MetaData, Table, Column,
     BigInteger, Numeric, Text, DateTime, UniqueConstraint, Index
 )
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.engine import Engine
-from sqlalchemy.sql import func
 
 # =========================
 # Config Banco de Dados
