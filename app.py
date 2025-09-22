@@ -319,7 +319,7 @@ DASH_HTML = """
       <div class="muted">Atualizado em</div>
       <div class="mono" id="updated_at">{{updated_at}}</div>
       <div class="muted" style="margin-top:8px">Últimos 50 registros</div>
-      <div id="table_html">{{table_html | safe}}</div>
+      <div id="table_wrap">{{table_wrap | safe}}</div>
     </div>
   </div>
 
