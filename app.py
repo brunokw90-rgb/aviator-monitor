@@ -666,4 +666,5 @@ def dbg_db_url():
             "hostname": p.hostname,       # ESPERADO: aws-1-sa-east-1.pooler.supabase.com
             "port": p.port,               # 5432
             "path": p.path,               # /postgres
-            "query": p.query,             # ssl
+            "query": p.query,             # sslmode=require
+        }, 200
