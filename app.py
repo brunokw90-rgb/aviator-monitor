@@ -367,6 +367,21 @@ DASH_HTML = """
 # =========================
 # Rotas
 # =========================
+
+import traceback
+_last_error = {"trace": None}
+
+@app.errorhandler(Exception)
+def on_any_error(e):
+    # guarda último stacktrace
+    _last_error["trace"] = traceback.format_exc()
+    raise e  # deixa o Flask/Log tratar normalmente
+
+@app.get("/debug/last-trace")
+def last_trace():
+    t = _last_error.get("trace")
+    return ("<pre>"+t+"</pre>") if t else "Sem stacktrace capturado."
+
 @app.get("/health")
 def health():
     return "OK"
@@ -412,12 +427,26 @@ def logout():
 @app.get("/")
 @login_required
 def dashboard():
-    df = load_df(CSV_PATH, JSON_URL)
-    s = get_multiplier_series(df)
-    freqs = compute_freqs(s, window=WINDOW)
-    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    source = JSON_URL if JSON_URL else CSV_PATH
-    table_html = build_table_html(df)
+    try:
+        df = load_df(CSV_PATH, JSON_URL)
+        s = get_multiplier_series(df)
+        freqs = compute_freqs(s, window=WINDOW)
+        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        source = JSON_URL if JSON_URL else CSV_PATH
+        table_html = build_table_html(df)
+    except Exception as e:
+        # Loga stacktrace completo no Render
+        app.logger.exception("Erro no dashboard")
+        # Fallback bem simples para não quebrar
+        freqs = {
+            "n": 0, "min": None, "mean": None, "std": None,
+            "p50": None, "p90": None, "p99": None,
+            "window": WINDOW,
+            "cuts": {"2x": 0, "5x": 0, "10x": 0, "20x": 0}
+        }
+        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        source = JSON_URL if JSON_URL else CSV_PATH
+        table_html = "<em>Erro ao carregar dados (veja logs)</em>"
 
     return render_template_string(
         DASH_HTML,
