@@ -32,6 +32,9 @@ CSV_PATH = os.getenv("CSV_PATH", "audit_out/live_rollup.csv").strip()
 # Janela (tamanho do “rollup” para métricas)
 WINDOW = int(os.getenv("FREQ_WINDOW", "500"))
 
+import sys
+print(f"🐍 Python version being used: {sys.version}")
+
 # =========================
 # Conexão SQLAlchemy
 # =========================
