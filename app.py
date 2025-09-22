@@ -33,6 +33,92 @@ CSV_PATH = os.getenv("CSV_PATH", "audit_out/live_rollup.csv").strip()
 WINDOW = int(os.getenv("FREQ_WINDOW", "500"))
 
 # =========================
+# Database (Postgres via SQLAlchemy)
+# =========================
+from sqlalchemy import (
+    create_engine, MetaData, Table, Column,
+    BigInteger, Numeric, Text, DateTime, UniqueConstraint, Index
+)
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import Engine
+from sqlalchemy.sql import func
+
+DB_HOST = os.getenv("DB_HOST")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+
+def _db_url() -> str:
+    if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
+        raise RuntimeError("Variáveis do banco ausentes. Defina DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD.")
+    return (
+        f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}"
+        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    )
+
+_engine: Engine | None = None
+_metadata = MetaData()
+
+# Tabela central para persistir os resultados
+multipliers = Table(
+    "multipliers",
+    _metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("round", BigInteger, nullable=True),        # alguns feeds têm 'rodada'
+    Column("multiplier", Numeric(20, 8), nullable=False),
+    Column("datetime", DateTime(timezone=True), server_default=func.now()),
+    Column("source", Text, nullable=True),
+    Column("raw", Text, nullable=True),                # JSON bruto como string se quiser
+    # regra de unicidade por round (quando existir): evita duplicar a mesma rodada
+    UniqueConstraint("round", name="uq_multipliers_round"),
+    # índice para consultas por data
+    Index("ix_multipliers_datetime", "datetime"),
+)
+
+def db_engine() -> Engine:
+    global _engine
+    if _engine is None:
+        _engine = create_engine(_db_url(), pool_pre_ping=True, pool_size=5, max_overflow=5)
+        # cria a tabela se não existir
+        _metadata.create_all(_engine)
+    return _engine
+
+def save_rows(rows: list[dict], source: str | None = None) -> int:
+    """
+    Insere linhas no banco. Cada item de rows deve ter, no mínimo:
+      {"multiplier": <float>, "round": <int|null>, "datetime": <datetime|string|null>}
+    Faz UPSERT por 'round' quando round vier preenchido (do-nothing se já existir).
+    Retorna quantas foram efetivamente inseridas.
+    """
+    if not rows:
+        return 0
+
+    # anexa 'source' se vier
+    if source:
+        for r in rows:
+            r.setdefault("source", source)
+
+    eng = db_engine()
+    inserted = 0
+
+    with eng.begin() as conn:
+        # tenta usar upsert por 'round' quando houver round na maioria das linhas
+        has_round = any(r.get("round") is not None for r in rows)
+        if has_round:
+            stmt = pg_insert(multipliers).values(rows)
+            stmt = stmt.on_conflict_do_nothing(index_elements=["round"])
+            result = conn.execute(stmt)
+            # em do_nothing o rowcount pode ser -1 dependendo do driver; contamos manualmente:
+            inserted = result.rowcount if result.rowcount and result.rowcount > 0 else 0
+        else:
+            # sem 'round', apenas append (pode gerar duplicatas)
+            result = conn.execute(multipliers.insert(), rows)
+            inserted = result.rowcount or 0
+
+    return inserted
+
+# =========================
 # Flask
 # =========================
 app = Flask(__name__)
@@ -457,6 +543,35 @@ def api_live():
     s = get_multiplier_series(df)
     freqs = compute_freqs(s, window=WINDOW)
     table_html = build_table_html(df)
+# --- Persistência leve (salva últimas leituras) ---
+    try:
+        # prepara linhas para salvar
+        rows = []
+        if not df.empty:
+            # escolhe colunas que existirão no seu DataFrame
+            col_mult = next((c for c in df.columns if c.lower() in ("multiplier","mult","m","valor","value","x")), None)
+            col_round = next((c for c in df.columns if c.lower() in ("round","rodada","id")), None)
+            col_dt    = next((c for c in df.columns if c.lower() in ("datetime","data","date","hora","time")), None)
+
+            # usamos somente as N últimas para não forçar o free tier
+            for _, r in df.tail(50).iterrows():
+                rows.append({
+                    "multiplier": float(r[col_mult]) if col_mult and pd.notna(r[col_mult]) else None,
+                    "round": int(r[col_round]) if col_round and pd.notna(r[col_round]) else None,
+                    "datetime": pd.to_datetime(r[col_dt], errors="coerce") if col_dt else None,
+                    "raw": None,  # se quiser, json.dumps(r.to_dict(), ensure_ascii=False)
+                })
+
+            # limpa inválidos
+            rows = [x for x in rows if x["multiplier"] is not None]
+
+        # salva (upsert por round quando houver)
+        inserted = save_rows(rows, source=JSON_URL or CSV_PATH)
+        # log simples
+        print(f"[DB] inseridas: {inserted}")
+    except Exception as e:
+        # não quebrar o endpoint em caso de falha do banco
+        print(f"[DB] erro ao inserir: {e}")
     return jsonify({
         "ok": True,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
@@ -488,6 +603,41 @@ def dbg_sample():
         return jsonify({"ok": True, "shape": shape, "columns": cols, "rows": rows})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.get("/db/ping")
+def db_ping():
+    try:
+        eng = db_engine()
+        with eng.connect() as c:
+            one = c.exec_driver_sql("SELECT 1").scalar()
+        return {"ok": True, "one": one}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}, 500
+
+@app.get("/db/count")
+def db_count():
+    try:
+        eng = db_engine()
+        with eng.connect() as c:
+            n = c.exec_driver_sql("SELECT count(*) FROM multipliers").scalar()
+        return {"ok": True, "count": int(n)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}, 500
+
+@app.get("/db/last")
+def db_last():
+    try:
+        eng = db_engine()
+        with eng.connect() as c:
+            rows = c.exec_driver_sql("""
+                SELECT round, multiplier, datetime, source
+                FROM multipliers
+                ORDER BY datetime DESC
+                LIMIT 10
+            """).mappings().all()
+        return {"ok": True, "rows": list(rows)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}, 500
 
 # =========================
 # Main (local)
