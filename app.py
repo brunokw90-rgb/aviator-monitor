@@ -35,7 +35,7 @@ WINDOW = int(os.getenv("FREQ_WINDOW", "500"))
 # =========================
 # Flask
 # =========================
-app = Flask(_name_)
+app = Flask(__name__)
 app.config["SECRET_KEY"] = SECRET_KEY
 
 # =========================
@@ -499,6 +499,6 @@ def dbg_sample():
 # =========================
 # Main (local)
 # =========================
-if _name_ == "_main_":
+if __name__ == "__main__":
     # debug=True só localmente
     app.run(host="0.0.0.0", port=5000, debug=True)
