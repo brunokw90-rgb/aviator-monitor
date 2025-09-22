@@ -302,41 +302,17 @@ DASH_HTML = """
 
   <div class="wrap">
     <div class="grid">
-  <div class="card">
-    <div class="muted">Total (n)</div>
-    <div class="big" id="n">{{ freqs.n }}</div>
-  </div>
-  <div class="card">
-    <div class="muted">Média</div>
-    <div class="big mono" id="mean">{{ freqs.mean }}</div>
-  </div>
-  <div class="card">
-    <div class="muted">Desvio</div>
-    <div class="big mono" id="std">{{ freqs.std }}</div>
-  </div>
-  <div class="card">
-    <div class="muted">P90</div>
-    <div class="big mono" id="p90">{{ freqs.p90 }}</div>
-  </div>
+  <div class="card"><div class="muted">Total (n)</div><div class="big" id="n">{{ freqs.n }}</div></div>
+  <div class="card"><div class="muted">Média</div><div class="big mono" id="mean">{{ freqs.mean }}</div></div>
+  <div class="card"><div class="muted">Desvio</div><div class="big mono" id="std">{{ freqs.std }}</div></div>
+  <div class="card"><div class="muted">P90</div><div class="big mono" id="p90">{{ freqs.p90 }}</div></div>
 </div>
 
 <div class="grid" style="margin-top:12px">
-  <div class="card">
-    <div class="muted">≥ 2x</div>
-    <div class="big ok" id="ge2">{{ freqs.cuts["2x"] }}%</div>
-  </div>
-  <div class="card">
-    <div class="muted">≥ 5x</div>
-    <div class="big warn" id="ge5">{{ freqs.cuts["5x"] }}%</div>
-  </div>
-  <div class="card">
-    <div class="muted">≥ 10x</div>
-    <div class="big warn" id="ge10">{{ freqs.cuts["10x"] }}%</div>
-  </div>
-  <div class="card">
-    <div class="muted">≥ 20x</div>
-    <div class="big bad" id="ge20">{{ freqs.cuts["20x"] }}%</div>
-  </div>
+  <div class="card"><div class="muted">≥ 2x</div><div class="big ok"   id="ge2">{{  freqs.cuts["2x"]  }}%</div></div>
+  <div class="card"><div class="muted">≥ 5x</div><div class="big warn" id="ge5">{{  freqs.cuts["5x"]  }}%</div></div>
+  <div class="card"><div class="muted">≥ 10x</div><div class="big warn" id="ge10">{{ freqs.cuts["10x"] }}%</div></div>
+  <div class="card"><div class="muted">≥ 20x</div><div class="big bad"  id="ge20">{{ freqs.cuts["20x"] }}%</div></div>
 </div>
 
 <div class="card" style="margin-top:12px">
@@ -363,46 +339,59 @@ const fmtPct = v => {
 };
 
 <script>
-function setText(id, v) {
-  const el = document.getElementById(id);
-  if (el != null && v != null) el.textContent = v;
-}
-function fmt4(x){ return (x==null||isNaN(x)) ? '' : Number(x).toFixed(4); }
-function pct(x){ return (x==null||isNaN(x)) ? '' : (Number(x).toFixed(2) + '%'); }
+(function(){
+  const IDs = ['n','mean','std','p90','ge2','ge5','ge10','ge20','updated_at','table_wrap'];
 
-async function refreshLive() {
-  try {
-    const r = await fetch('/api/live', { cache: 'no-store' });
-    const j = await r.json();
-    if (!j.ok) return;
+  function hasAll(){ return IDs.every(id => document.getElementById(id)); }
+  function setText(id, v){ const el = document.getElementById(id); if (el && v!=null) el.textContent = v; }
+  function fmt4(x){ return (x==null||isNaN(x)) ? '' : Number(x).toFixed(4); }
+  function pct(x){ return (x==null||isNaN(x)) ? '' : (Number(x).toFixed(2)+'%'); }
 
-    const f = j.freqs || {};
-    const cuts = f.cuts || {};
+  async function refreshLive(){
+    try {
+      const res = await fetch('/api/live?ts='+Date.now(), { cache:'no-store' });
+      const j = await res.json();
+      console.log('tick /api/live =>', j);     // <-- veja no Console
+      if (!j || !j.ok) return;
 
-    setText('n', f.n);
-    setText('mean', fmt4(f.mean));
-    setText('std', fmt4(f.std));
-    setText('p90', fmt4(f.p90));
-    setText('ge2',  pct(cuts["2x"] ?? f.ge_2x));
-    setText('ge5',  pct(cuts["5x"] ?? f.ge_5x));
-    setText('ge10', pct(cuts["10x"] ?? f.ge_10x));
-    setText('ge20', pct(cuts["20x"] ?? f.ge_20x));
+      const f = j.freqs || {};
+      const cuts = f.cuts || {};
 
-    // Atualiza a tabela
-    const wrap = document.getElementById('table_wrap');
-    if (wrap && j.table_html) wrap.innerHTML = j.table_html;
+      setText('n',   f.n);
+      setText('mean',fmt4(f.mean));
+      setText('std', fmt4(f.std));
+      setText('p90', fmt4(f.p90));
+      setText('ge2',  pct(cuts['2x']  ?? f.ge_2x));
+      setText('ge5',  pct(cuts['5x']  ?? f.ge_5x));
+      setText('ge10', pct(cuts['10x'] ?? f.ge_10x));
+      setText('ge20', pct(cuts['20x'] ?? f.ge_20x));
 
-    // Carimbo de horário
-    const upd = document.getElementById('updated_at');
-    if (upd) upd.textContent = new Date().toLocaleString();
-  } catch (e) {
-    console.error('refreshLive error:', e);
+      const wrap = document.getElementById('table_wrap');
+      if (wrap && j.table_html) wrap.innerHTML = j.table_html;
+
+      setText('updated_at', new Date().toLocaleString());
+    } catch (err) {
+      console.error('refresh error:', err);
+    }
   }
-}
 
-// primeira atualização e depois a cada 2s
-refreshLive();
-setInterval(refreshLive, 2000);
+  function start(){
+    if (!hasAll()){ console.warn('IDs faltando no HTML'); return; }
+    refreshLive();
+    window._liveTimer && clearInterval(window._liveTimer);
+    window.__liveTimer = setInterval(refreshLive, 2000);
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshLive();
+  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
 </script>
 </body>
 </html>
@@ -457,40 +446,38 @@ def logout():
     return redirect(url_for("login"))
 
 
-@app.route("/")
+@app.get("/")
 @login_required
 def dashboard():
     df = load_df(CSV_PATH, JSON_URL)
-    s = get_multiplier_series(df)
-    freqs = compute_freqs(s, window=WINDOW)
-    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # >>> usar o helper que já ordena e pega os 50 mais recentes
+    freqs = compute_freqs(df)
     table_html = build_table_html(df)
-
+    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     source = JSON_URL if JSON_URL else CSV_PATH
+
     return render_template_string(
         DASH_HTML,
         freqs=freqs,
         updated_at=updated_at,
         window=WINDOW,
         source_data=source,
-        table_html=table_html
+        table_html=table_html   # <- garanta que esse campo existe aqui
     )
 
 
 @app.get("/api/live")
-@login_required
 def api_live():
     df = load_df(CSV_PATH, JSON_URL)
-    s = get_multiplier_series(df)
-    freqs = compute_freqs(s, window=WINDOW)
+    freqs = compute_freqs(df)
+    table_html = build_table_html(df)
+
     return jsonify({
         "ok": True,
+        "freqs": freqs,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
         "window": WINDOW,
-        "freqs": freqs,
-        "table_html": build_table_html(df),  # <-- ADICIONE/CONFIRME ISTO
+        # aqui precisa devolver a tabela também!
+        "table_html": table_html
     })
 
 # =========================
