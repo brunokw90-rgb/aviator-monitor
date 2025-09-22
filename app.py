@@ -55,11 +55,10 @@ def login_required(view):
 # =========================
 def load_df_from_json(url: str) -> pd.DataFrame:
     """
-    Lê dados de um endpoint JSON. Aceita formatos:
-    - lista: [{"multiplier": 1.2, "time": "..."} , ...]
-    - dict com lista: {"data":[...]}, {"result":[...]}, {"results":[...]}, {"velas":[...]}, ...
-    - Suporta também chaves em PT como "multiplicador", "rodada", etc.
-    Normaliza para colunas: multiplier, datetime, round
+    Tenta ler dados do endpoint JSON. Aceita formatos:
+    - lista de objetos: [{"multiplier": 1.2, "time": "..."}]
+    - objeto com lista: {"data": [...]} / {"result": [...]} / {"velas": [...]} etc.
+    Normaliza para um DataFrame com as colunas possíveis.
     """
     if not url:
         raise ValueError("JSON_URL vazio")
@@ -68,9 +67,10 @@ def load_df_from_json(url: str) -> pd.DataFrame:
     r.raise_for_status()
     data = r.json()
 
-    # Se vier dict com lista em alguma chave conhecida, extrai
+    # Extrair a lista
     if isinstance(data, dict):
-        for k in ("data", "result", "results", "velas", "candles", "items"):
+        # Adicione "resultados" à lista de chaves possíveis
+        for k in ("data", "result", "results", "velas", "candles", "items", "resultados"):
             if k in data and isinstance(data[k], list):
                 data = data[k]
                 break
@@ -83,57 +83,37 @@ def load_df_from_json(url: str) -> pd.DataFrame:
         if not isinstance(item, dict):
             continue
 
-        # multiplicador (PT e EN)
+        # Adicione "multiplicador" às chaves possíveis
         mult = (
             item.get("multiplier")
-            or item.get("multiplicador")
             or item.get("mult")
             or item.get("m")
             or item.get("valor")
             or item.get("value")
             or item.get("x")
+            or item.get("multiplicador")
         )
 
-        # datetime
+        # Data/hora: tente montar a string com "date" e "end" se existirem
         dt = (
             item.get("timestamp")
-            or item.get("datetime")
-            or item.get("end")         # ex.: "16:50:37" -> usaremos com date se houver
             or item.get("data")
             or item.get("date")
             or item.get("hora")
             or item.get("time")
+            or (f'{item.get("date", "")} {item.get("end", "")}'.strip() if item.get("date") and item.get("end") else None)
         )
-
-        # round id
-        rid = item.get("round") or item.get("rodada") or item.get("id")
-
-        # se vier "date" e "end" separados, combine
-        if isinstance(item.get("date"), str) and isinstance(item.get("end"), str):
-            try:
-                dt = f"{item['date']} {item['end']}"
-            except Exception:
-                pass
 
         rows.append({
             "multiplier": mult,
             "datetime": dt,
-            "round": rid
+            "round": item.get("round") or item.get("rodada") or item.get("id")
         })
 
     df = pd.DataFrame(rows)
     if "multiplier" in df.columns:
         df["multiplier"] = pd.to_numeric(df["multiplier"], errors="coerce")
-
-    # normaliza datetime quando possível
-    if "datetime" in df.columns:
-        try:
-            df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
-        except Exception:
-            # mantém como string se falhar
-            pass
-
-    df = df.dropna(subset=["multiplier"])
+    return df.dropna(subset=["multiplier"])
     return df
 
 
