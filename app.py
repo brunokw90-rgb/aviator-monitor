@@ -231,7 +231,17 @@ def build_table_html(df: pd.DataFrame, limit: int = 50) -> str:
                  "datetime", "data", "date", "hora", "time", "end",
                  "round", "rodada", "id")
     cols = [c for c in df.columns if c.lower() in preferred]
-    show = df[cols].tail(limit) if cols else df.tail(limit)
+    # Tenta ordenar pelo campo de data/hora, se existir
+order_col = None
+for c in ("datetime", "data", "date", "hora", "time", "end"):
+    if c in df.columns:
+        order_col = c
+        break
+
+if order_col:
+    show = df[cols].sort_values(order_col, ascending=False).head(limit) if cols else df.sort_values(order_col, ascending=False).head(limit)
+else:
+    show = df[cols].iloc[::-1].head(limit) if cols else df.iloc[::-1].head(limit)  # Se não tiver coluna de data, inverte a ordem
     # garante ordenação do mais novo para o mais antigo (se tiver datetime)
     if "datetime" in show.columns and pd.api.types.is_datetime64_any_dtype(show["datetime"]):
         show = show.sort_values("datetime", ascending=False)
