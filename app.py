@@ -65,53 +65,22 @@ from sqlalchemy import (
     create_engine, MetaData, Table, Column,
     BigInteger, Numeric, Text, DateTime, UniqueConstraint, Index
 )
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import Engine
+from sqlalchemy.sql import func
 
 # =========================
 # Config Banco de Dados
 # =========================
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT", "5432")
-DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_SSLMODE = os.getenv("DB_SSLMODE", "require")  # SSL por padrão no Render/Supabase
-
-def _ensure_psycopg_driver(url: str) -> str:
-    """
-    Garante que a URL use o driver psycopg v3 com SQLAlchemy.
-    Converte 'postgres://' -> 'postgresql://'
-    E 'postgresql://' -> 'postgresql+psycopg://'
-    """
-    if url.startswith("postgres://"):
-        url = "postgresql://" + url[len("postgres://"):]
-    if url.startswith("postgresql://") and "+psycopg" not in url:
-        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
-    return url
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 def _db_url() -> str:
     """
-    Retorna a URL de conexão do banco.
-    - Se DATABASE_URL estiver setada, usa ela (ajustando para psycopg).
-    - Caso contrário, monta com DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD e sslmode.
+    Retorna a URL de conexão do banco (DATABASE_URL).
     """
-    url = os.getenv("DATABASE_URL")
-    if url:
-        return _ensure_psycopg_driver(url)
-
-    if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
-        raise RuntimeError(
-            "Variáveis do banco ausentes. "
-            "Defina DATABASE_URL OU DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD."
-        )
-
-    # Driver novo: +psycopg
-    base = (
-        f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}"
-        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    )
-    if "sslmode=" not in base:
-        base += f"?sslmode={DB_SSLMODE}"
-    return base
+    if not DATABASE_URL:
+        raise RuntimeError("Variável DATABASE_URL ausente. Defina no Render ou Supabase.")
+    return DATABASE_URL
 
 _engine: Engine | None = None
 _metadata = MetaData()
@@ -121,48 +90,26 @@ multipliers = Table(
     "multipliers",
     _metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
-    Column("round", BigInteger, nullable=True),        # alguns feeds têm 'rodada'
+    Column("round", BigInteger, nullable=True),
     Column("multiplier", Numeric(20, 8), nullable=False),
     Column("datetime", DateTime(timezone=True), server_default=func.now()),
     Column("source", Text, nullable=True),
-    Column("raw", Text, nullable=True),                # JSON bruto como string se quiser
+    Column("raw", Text, nullable=True),
     UniqueConstraint("round", name="uq_multipliers_round"),
     Index("ix_multipliers_datetime", "datetime"),
 )
 
 def db_engine() -> Engine:
-    """
-    Cria (lazy) a Engine e garante a existência das tabelas.
-    """
     global _engine
     if _engine is None:
-        _engine = create_engine(
-            _db_url(),
-            pool_pre_ping=True,
-            pool_size=5,
-            max_overflow=5,
-            future=True,
-        )
+        _engine = create_engine(_db_url(), pool_pre_ping=True, pool_size=5, max_overflow=5)
         _metadata.create_all(_engine)
-        try:
-            with _engine.connect() as conn:
-                conn.exec_driver_sql("SELECT 1")
-            print("[DB] Conexão criada com sucesso:", _engine.url)
-        except Exception as e:
-            print("[DB] Erro ao conectar:", e)
     return _engine
 
 def save_rows(rows: list[dict], source: str | None = None) -> int:
-    """
-    Insere linhas no banco. Cada item de rows deve ter, no mínimo:
-      {"multiplier": <float>, "round": <int|null>, "datetime": <datetime|string|null>}
-    Faz UPSERT por 'round' quando round vier preenchido (do-nothing se já existir).
-    Retorna quantas foram efetivamente inseridas.
-    """
     if not rows:
         return 0
 
-    # anexa 'source' se vier
     if source:
         for r in rows:
             r.setdefault("source", source)
@@ -176,7 +123,7 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
             stmt = pg_insert(multipliers).values(rows)
             stmt = stmt.on_conflict_do_nothing(index_elements=["round"])
             result = conn.execute(stmt)
-            inserted = result.rowcount if (result.rowcount and result.rowcount > 0) else 0
+            inserted = result.rowcount if result.rowcount and result.rowcount > 0 else 0
         else:
             result = conn.execute(multipliers.insert(), rows)
             inserted = result.rowcount or 0
