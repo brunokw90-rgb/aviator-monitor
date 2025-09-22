@@ -318,8 +318,10 @@ DASH_HTML = """
     <div class="card" style="margin-top:12px">
       <div class="muted">Atualizado em</div>
       <div class="mono" id="updated_at">{{updated_at}}</div>
+
       <div class="muted" style="margin-top:8px">Últimos 50 registros</div>
-      <div id="table_wrap">{{table_wrap | safe}}</div>
+      <!-- Contêiner onde o JS vai injetar a tabela -->
+      <div id="table_wrap">{{ table_html | safe }}</div>
     </div>
   </div>
 
@@ -337,37 +339,35 @@ const fmtPct = v => {
   return perc.toFixed(2) + '%';
 };
 
-async function refreshLive(){
-  try{
-    const r = await fetch('/api/live', {cache:'no-store'});
-    if(!r.ok) return;
+<script>
+async function refreshLive() {
+  try {
+    const r = await fetch('/api/live', { cache: 'no-store' });
     const j = await r.json();
-    if(!j.ok) return;
+    if (!j.ok) return;
+
     const f = j.freqs || {};
-    const cuts = f.cuts || {};
+    setText('n', f.n);
+    setText('mean', Number(f.mean).toFixed(4));
+    setText('std', Number(f.std).toFixed(4));
+    setText('p90', Number(f.p90).toFixed(4));
+    setText('ge2', (f.cuts?.["2x"] ?? f.ge_2x) + '%');
+    setText('ge5', (f.cuts?.["5x"] ?? f.ge_5x) + '%');
+    setText('ge10', (f.cuts?.["10x"] ?? f.ge_10x) + '%');
+    setText('ge20', (f.cuts?.["20x"] ?? f.ge_20x) + '%');
 
-    if ($('n'))    $('n').textContent    = f.n ?? '0';
-    if ($('mean')) $('mean').textContent = fmtNum(f.mean);
-    if ($('std'))  $('std').textContent  = fmtNum(f.std);
-    if ($('p90'))  $('p90').textContent  = fmtNum(f.p90);
+    // Atualiza a TABELA
+    const wrap = document.getElementById('table_wrap');
+    if (wrap && j.table_html) wrap.innerHTML = j.table_html;
 
-    if ($('ge2'))  $('ge2').textContent  = fmtPct(cuts["2x"]);
-    if ($('ge5'))  $('ge5').textContent  = fmtPct(cuts["5x"]);
-    if ($('ge10')) $('ge10').textContent = fmtPct(cuts["10x"]);
-    if ($('ge20')) $('ge20').textContent = fmtPct(cuts["20x"]);
-
-    if ($('updated_at')) $('updated_at').textContent = new Date().toLocaleString();
-
-    // Se você quiser, pode fazer o back devolver table_html no /api/live`
-    // e atualizar aqui:
-    // if (j.table_html && $('k_table')) $('k_table').innerHTML = j.table_html;
-
-  }catch(e){
-    // silencioso
+    // Atualiza o carimbo de horário
+    const upd = document.getElementById('updated_at');
+    if (upd) upd.textContent = new Date().toLocaleString();
+  } catch (e) {
+    console.error(e);
   }
 }
-
-// primeira atualização imediata e depois a cada 2s
+function setText(id, v){ const el=document.getElementById(id); if(el!=null && v!=null) el.textContent=v; }
 refreshLive();
 setInterval(refreshLive, 2000);
 </script>
