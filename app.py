@@ -4,6 +4,8 @@ import math
 import traceback
 from datetime import datetime, timedelta
 from functools import wraps
+import threading
+import time
 
 import pandas as pd
 import requests
@@ -85,6 +87,8 @@ def _db_url() -> str:
 
 # Variável global para engine
 _engine = None
+_collector_running = False
+_collector_thread = None
 
 # metadata global (usado para criar tabelas etc.)
 metadata = MetaData()
@@ -1044,6 +1048,16 @@ def debug_timestamps():
         
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
+
+@app.get("/collector/start")  
+@login_required
+def start_collector():
+    return jsonify({"ok": True, "message": "Coletor será implementado"})
+
+@app.get("/collector/status")
+@login_required  
+def collector_status():
+    return jsonify({"ok": True, "running": False, "message": "Coletor não implementado ainda"})
 
 
 # =========================
