@@ -153,7 +153,7 @@ def db_engine() -> Engine:
     return _engine
 
 def save_rows(rows: list[dict], source: str | None = None) -> int:
-    """CORRIGIDO: Timestamps únicos e ordenação melhorada"""
+    """CORRIGIDO: Distribui timestamps para evitar registros simultâneos"""
     if not rows:
         return 0
 
@@ -167,37 +167,47 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
             print("[DB] Engine retornou None - banco não disponível")
             return 0
         
+        # FILTRO CRÍTICO: Pegar apenas rounds realmente novos
         if rows:
+            # Primeiro, descobre qual é o maior round já no banco
             with eng.connect() as conn:
                 result = conn.execute(text("SELECT COALESCE(MAX(round), 0) FROM multipliers"))
                 max_round_db = result.fetchone()[0] or 0
             
+            # Filtra apenas rounds MAIORES que o que já temos
             valid_rows = []
-            base_time = datetime.now()  # Tempo base
-            
-            for i, r in enumerate(rows):
+            for r in rows:
                 round_num = r.get('round')
                 if round_num and round_num > max_round_db:
-                    # CRÍTICO: Timestamp único para cada registro
-                    # Adiciona microssegundos baseado no índice e round
-                    microsecond_offset = (i * 1000) + (round_num % 1000)
-                    unique_time = base_time + timedelta(microseconds=microsecond_offset)
-                    
-                    r['datetime'] = unique_time
                     valid_rows.append(r)
             
+            # Ordena por round CRESCENTE para distribuir timestamps corretamente
             if valid_rows:
-                # Ordena por round CRESCENTE para manter ordem cronológica
                 valid_rows = sorted(valid_rows, key=lambda x: x.get('round', 0) or 0)
-                rows = valid_rows[:20]
-                print(f"[DB] Filtrados {len(rows)} registros novos com timestamps únicos")
+                
+                # NOVO: Distribui timestamps ao longo do tempo
+                current_time = datetime.now()
+                total_new = len(valid_rows)
+                
+                # Estima intervalo entre jogadas (média 20-30 segundos)
+                interval_seconds = 25  # segundos entre jogadas
+                
+                # Distribui timestamps retroativamente
+                for i, r in enumerate(valid_rows):
+                    # Registros mais antigos (round menor) ficam mais no passado
+                    seconds_ago = (total_new - i - 1) * interval_seconds
+                    r['datetime'] = current_time - timedelta(seconds=seconds_ago)
+                
+                # Limita a 50 novos registros por vez
+                rows = valid_rows[:50]
+                print(f"[DB] Filtrados {len(rows)} registros novos (rounds > {max_round_db}) com timestamps distribuídos")
             else:
                 rows = []
                 print(f"[DB] Nenhum registro novo (max round DB: {max_round_db})")
             
         inserted = 0
 
-        if rows:
+        if rows:  # Só tenta inserir se há dados válidos
             with eng.begin() as conn:
                 has_round = any(r.get("round") is not None for r in rows)
                 if has_round:
@@ -209,7 +219,7 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
                     result = conn.execute(multipliers.insert(), rows)
                     inserted = result.rowcount or 0
 
-        print(f"[DB] SUCESSO! Inseridas {inserted} linhas com timestamps únicos")
+        print(f"[DB] SUCESSO! Inseridas {inserted} linhas com timestamps distribuídos")
         return inserted
     except Exception as e:
         print(f"[DB] ERRO AO SALVAR: {type(e).__name__}: {e}")
