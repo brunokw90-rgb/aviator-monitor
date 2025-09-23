@@ -1,6 +1,7 @@
 # app.py
 import os
 import math
+import traceback
 from datetime import datetime
 from functools import wraps
 
@@ -44,7 +45,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import Engine
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 
 # =========================
 # Config Banco de Dados
@@ -91,7 +92,7 @@ metadata = MetaData()
 # Tabela central para persistir os resultados
 multipliers = Table(
     "multipliers",
-    metadata,  # CORRIGIDO: era _metadata
+    metadata,
     Column("id", BigInteger, primary_key=True, autoincrement=True),
     Column("round", BigInteger, nullable=True),
     Column("multiplier", Numeric(20, 8), nullable=False),
@@ -195,6 +196,17 @@ except Exception as e:
 # =========================
 app = Flask(__name__)
 app.config["SECRET_KEY"] = SECRET_KEY
+
+# =========================
+# Error handling
+# =========================
+_last_error = {"trace": None}
+
+@app.errorhandler(Exception)
+def on_any_error(e):
+    # guarda último stacktrace
+    _last_error["trace"] = traceback.format_exc()
+    raise e  # deixa o Flask/Log tratar normalmente
 
 # =========================
 # Auth helpers
@@ -515,148 +527,8 @@ DASH_HTML = """
 """
 
 # =========================
-# Rotas
-# =========================
-
-import traceback
-_last_error = {"trace": None}
-
-@app.errorhandler(Exception)
-def on_any_error(e):
-    # guarda último stacktrace
-    _last_error["trace"] = traceback.format_exc()
-    raise e  # deixa o Flask/Log tratar normalmente
-
-@app.get("/debug/last-trace")
-def last_trace():
-    t = _last_error.get("trace")
-    return ("<pre>"+t+"</pre>") if t else "Sem stacktrace capturado."
-
-@app.get("/health")
-def health():
-    return "OK"
-
-@app.get("/ping")
-def ping():
-    return "pong"
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    error = None
-    if request.method == "POST":
-        user = request.form.get("username", "")
-        pwd  = request.form.get("password", "")
-        if user == APP_USER and pwd == APP_PASS:
-            session["logged_in"] = True
-            nxt = request.args.get("next") or url_for("dashboard")
-            return redirect(nxt)
-        error = "Credenciais inválidas."
-    LOGIN_HTML = """
-    <!doctype html>
-    <html lang="pt-br"><head><meta charset="utf-8"><title>Login</title>
-    <style>body{font-family:system-ui;background:#0b1220;color:#eaf1ff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
-    .card{background:#111d38;padding:24px;border-radius:10px;width:320px}label{display:block;margin:10px 0 4px}
-    input{width:100%;padding:10px;border-radius:8px;border:1px solid #223055;background:#0f1a31;color:#fff}button{margin-top:14px;width:100%;padding:10px;border:0;border-radius:8px;background:#334155;color:#fff;cursor:pointer}
-    .err{color:#ef4444;margin-top:10px}</style></head><body>
-    <div class="card"><h2>Entrar</h2>
-      <form method="post">
-        <label>Usuário</label><input name="username" autocomplete="username" required>
-        <label>Senha</label><input name="password" type="password" autocomplete="current-password" required>
-        <button type="submit">Acessar</button>
-        {% if error %}<div class="err">{{error}}</div>{% endif %}
-      </form>
-    </div></body></html>
-    """
-    return render_template_string(LOGIN_HTML, error=error)
-
-@app.get("/logout")
-def logout():
-    session.clear()
-    return redirect(url_for("login"))
-
-@app.get("/")
-@login_required
-def dashboard():
-    try:
-        df = load_df(CSV_PATH, JSON_URL)
-        s = get_multiplier_series(df)
-        freqs = compute_freqs(s, window=WINDOW)
-        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        source = JSON_URL if JSON_URL else CSV_PATH
-        table_html = build_table_html(df)
-    except Exception as e:
-        # Loga stacktrace completo no Render
-        app.logger.exception("Erro no dashboard")
-        # Fallback bem simples para não quebrar
-        freqs = {
-            "n": 0, "min": None, "mean": None, "std": None,
-            "p50": None, "p90": None, "p99": None,
-            "window": WINDOW,
-            "cuts": {"2x": 0, "5x": 0, "10x": 0, "20x": 0}
-        }
-        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        source = JSON_URL if JSON_URL else CSV_PATH
-        table_html = "<em>Erro ao carregar dados (veja logs)</em>"
-
-    return render_template_string(
-        DASH_HTML,
-        freqs=freqs,
-        updated_at=updated_at,
-        window=WINDOW,
-        source_data=source,
-        table_html=table_html
-    )
-
-@app.get("/api/live")
-@login_required
-def api_live():
-    df = load_df(CSV_PATH, JSON_URL)
-    s = get_multiplier_series(df)
-    freqs = compute_freqs(s, window=WINDOW)
-    table_html = build_table_html(df)
-# --- Persistência leve (salva últimas leituras) ---
-    try:
-        # prepara linhas para salvar
-        rows = []
-        if not df.empty:
-            # escolhe colunas que existirão no seu DataFrame
-            col_mult = next((c for c in df.columns if c.lower() in ("multiplier","mult","m","valor","value","x")), None)
-            col_round = next((c for c in df.columns if c.lower() in ("round","rodada","id")), None)
-            col_dt    = next((c for c in df.columns if c.lower() in ("datetime","data","date","hora","time")), None)
-
-            # usamos somente as N últimas para não forçar o free tier
-            for _, r in df.tail(50).iterrows():
-                rows.append({
-                    "multiplier": float(r[col_mult]) if col_mult and pd.notna(r[col_mult]) else None,
-                    "round": int(r[col_round]) if col_round and pd.notna(r[col_round]) else None,
-                    "datetime": pd.to_datetime(r[col_dt], errors="coerce") if col_dt else None,
-                    "raw": None,  # se quiser, json.dumps(r.to_dict(), ensure_ascii=False)
-                })
-
-            # limpa inválidos
-            rows = [x for x in rows if x["multiplier"] is not None]
-
-        # salva (upsert por round quando houver)
-        inserted = save_rows(rows, source=JSON_URL or CSV_PATH)
-        # log simples
-        print(f"[DB] inseridas: {inserted}")
-    except Exception as e:
-        # não quebrar o endpoint em caso de falha do banco
-        print(f"[DB] erro ao inserir: {e}")
-    return jsonify({
-        "ok": True,
-        "updated_at": datetime.now().isoformat(timespec="seconds"),
-        "window": WINDOW,
-        "freqs": freqs,
-        "table_html": table_html
-    })
-
-# Adicione essas rotas ao seu app.py, antes da seção "# === DEBUG HELPERS ==="
-
-# =========================
 # Rotas do Banco de Dados
 # =========================
-from sqlalchemy.sql import text
 
 @app.get("/db/count")
 @login_required
@@ -789,37 +661,140 @@ def db_stats():
         print(f"[DB STATS] Erro: {e}")
         return jsonify({"ok": False, "error": str(e)}), 500
 
+# =========================
+# Rotas principais
+# =========================
 
-@app.get("/db/clear")
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        user = request.form.get("username", "")
+        pwd  = request.form.get("password", "")
+        if user == APP_USER and pwd == APP_PASS:
+            session["logged_in"] = True
+            nxt = request.args.get("next") or url_for("dashboard")
+            return redirect(nxt)
+        error = "Credenciais inválidas."
+    LOGIN_HTML = """
+    <!doctype html>
+    <html lang="pt-br"><head><meta charset="utf-8"><title>Login</title>
+    <style>body{font-family:system-ui;background:#0b1220;color:#eaf1ff;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+    .card{background:#111d38;padding:24px;border-radius:10px;width:320px}label{display:block;margin:10px 0 4px}
+    input{width:100%;padding:10px;border-radius:8px;border:1px solid #223055;background:#0f1a31;color:#fff}button{margin-top:14px;width:100%;padding:10px;border:0;border-radius:8px;background:#334155;color:#fff;cursor:pointer}
+    .err{color:#ef4444;margin-top:10px}</style></head><body>
+    <div class="card"><h2>Entrar</h2>
+      <form method="post">
+        <label>Usuário</label><input name="username" autocomplete="username" required>
+        <label>Senha</label><input name="password" type="password" autocomplete="current-password" required>
+        <button type="submit">Acessar</button>
+        {% if error %}<div class="err">{{error}}</div>{% endif %}
+      </form>
+    </div></body></html>
+    """
+    return render_template_string(LOGIN_HTML, error=error)
+
+@app.get("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+@app.get("/")
 @login_required
-def db_clear():
-    """CUIDADO: Remove todos os dados do banco (apenas para desenvolvimento)"""
+def dashboard():
     try:
-        # Só permite em desenvolvimento
-        if os.getenv("FLASK_ENV") != "development":
-            return jsonify({"ok": False, "error": "Operação não permitida em produção"}), 403
-            
-        eng = db_engine()
-        if not eng:
-            return jsonify({"ok": False, "error": "Banco não disponível"}), 500
-            
-        with eng.begin() as conn:
-            result = conn.execute(text("DELETE FROM multipliers"))
-            deleted = result.rowcount or 0
-            
-        return jsonify({
-            "ok": True,
-            "deleted_records": deleted,
-            "message": "Todos os dados foram removidos"
-        })
-        
+        df = load_df(CSV_PATH, JSON_URL)
+        s = get_multiplier_series(df)
+        freqs = compute_freqs(s, window=WINDOW)
+        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        source = JSON_URL if JSON_URL else CSV_PATH
+        table_html = build_table_html(df)
     except Exception as e:
-        print(f"[DB CLEAR] Erro: {e}")
-        return jsonify({"ok": False, "error": str(e)}), 500
+        # Loga stacktrace completo no Render
+        app.logger.exception("Erro no dashboard")
+        # Fallback bem simples para não quebrar
+        freqs = {
+            "n": 0, "min": None, "mean": None, "std": None,
+            "p50": None, "p90": None, "p99": None,
+            "window": WINDOW,
+            "cuts": {"2x": 0, "5x": 0, "10x": 0, "20x": 0}
+        }
+        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        source = JSON_URL if JSON_URL else CSV_PATH
+        table_html = "<em>Erro ao carregar dados (veja logs)</em>"
+
+    return render_template_string(
+        DASH_HTML,
+        freqs=freqs,
+        updated_at=updated_at,
+        window=WINDOW,
+        source_data=source,
+        table_html=table_html
+    )
+
+@app.get("/api/live")
+@login_required
+def api_live():
+    df = load_df(CSV_PATH, JSON_URL)
+    s = get_multiplier_series(df)
+    freqs = compute_freqs(s, window=WINDOW)
+    table_html = build_table_html(df)
+    
+    # Persistência leve (salva últimas leituras)
+    try:
+        # prepara linhas para salvar
+        rows = []
+        if not df.empty:
+            # escolhe colunas que existirão no seu DataFrame
+            col_mult = next((c for c in df.columns if c.lower() in ("multiplier","mult","m","valor","value","x")), None)
+            col_round = next((c for c in df.columns if c.lower() in ("round","rodada","id")), None)
+            col_dt    = next((c for c in df.columns if c.lower() in ("datetime","data","date","hora","time")), None)
+
+            # usamos somente as N últimas para não forçar o free tier
+            for _, r in df.tail(50).iterrows():
+                rows.append({
+                    "multiplier": float(r[col_mult]) if col_mult and pd.notna(r[col_mult]) else None,
+                    "round": int(r[col_round]) if col_round and pd.notna(r[col_round]) else None,
+                    "datetime": pd.to_datetime(r[col_dt], errors="coerce") if col_dt else None,
+                    "raw": None,  # se quiser, json.dumps(r.to_dict(), ensure_ascii=False)
+                })
+
+            # limpa inválidos
+            rows = [x for x in rows if x["multiplier"] is not None]
+
+        # salva (upsert por round quando houver)
+        inserted = save_rows(rows, source=JSON_URL or CSV_PATH)
+        # log simples
+        print(f"[DB] inseridas: {inserted}")
+    except Exception as e:
+        # não quebrar o endpoint em caso de falha do banco
+        print(f"[DB] erro ao inserir: {e}")
+        
+    return jsonify({
+        "ok": True,
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "window": WINDOW,
+        "freqs": freqs,
+        "table_html": table_html
+    })
 
 # =========================
 # Debug helpers
 # =========================
+
+@app.get("/debug/last-trace")
+def last_trace():
+    t = _last_error.get("trace")
+    return ("<pre>"+t+"</pre>") if t else "Sem stacktrace capturado."
+
+@app.get("/health")
+def health():
+    return "OK"
+
+@app.get("/ping")
+def ping():
+    return "pong"
+
 @app.get("/debug/python")
 def debug_python():
     import sys, platform
@@ -841,7 +816,6 @@ def dbg_sample():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-# --- DEBUG: inspeciona a URL do banco sem vazar senha
 @app.get("/debug/db_url")
 def dbg_db_url():
     try:
@@ -878,3 +852,11 @@ def dbg_db_url():
         }, 200
     except Exception as e:
         return {"ok": False, "error": repr(e)}, 200
+
+# =========================
+# Main
+# =========================
+
+if __name__ == "__main__":
+    port = int(os.getenv("PORT", "5000"))
+    app.run(host="0.0.0.0", port=port, debug=False)
