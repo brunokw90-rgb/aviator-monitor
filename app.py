@@ -656,6 +656,7 @@ def api_live():
 # =========================
 # Rotas do Banco de Dados
 # =========================
+from sqlalchemy.sql import text
 
 @app.get("/db/count")
 @login_required
@@ -667,11 +668,12 @@ def db_count():
             return jsonify({"ok": False, "error": "Banco não disponível"}), 500
             
         with eng.connect() as conn:
-            result = conn.execute("SELECT COUNT(*) as total FROM multipliers")
+            # Usando text() para SQL raw
+            result = conn.execute(text("SELECT COUNT(*) as total FROM multipliers"))
             total = result.fetchone()[0]
             
             # Também pega estatísticas básicas
-            stats_result = conn.execute("""
+            stats_result = conn.execute(text("""
                 SELECT 
                     MIN(multiplier) as min_mult,
                     MAX(multiplier) as max_mult,
@@ -680,7 +682,7 @@ def db_count():
                     MAX(datetime) as last_update
                 FROM multipliers 
                 WHERE multiplier IS NOT NULL
-            """)
+            """))
             stats = stats_result.fetchone()
             
         return jsonify({
@@ -712,12 +714,13 @@ def db_last():
             return jsonify({"ok": False, "error": "Banco não disponível"}), 500
             
         with eng.connect() as conn:
-            result = conn.execute(f"""
+            # Usando text() com parâmetro bindado para segurança
+            result = conn.execute(text("""
                 SELECT id, round, multiplier, datetime, source 
                 FROM multipliers 
                 ORDER BY datetime DESC, id DESC 
-                LIMIT {limit}
-            """)
+                LIMIT :limit_val
+            """), {"limit_val": limit})
             
             records = []
             for row in result:
@@ -755,13 +758,13 @@ def db_stats():
             
         with eng.connect() as conn:
             # Busca os últimos registros na janela especificada
-            result = conn.execute(f"""
+            result = conn.execute(text("""
                 SELECT multiplier
                 FROM multipliers 
                 WHERE multiplier IS NOT NULL
                 ORDER BY datetime DESC, id DESC 
-                LIMIT {window}
-            """)
+                LIMIT :window_val
+            """), {"window_val": window})
             
             multipliers = [float(row[0]) for row in result]
             
@@ -801,7 +804,7 @@ def db_clear():
             return jsonify({"ok": False, "error": "Banco não disponível"}), 500
             
         with eng.begin() as conn:
-            result = conn.execute("DELETE FROM multipliers")
+            result = conn.execute(text("DELETE FROM multipliers"))
             deleted = result.rowcount or 0
             
         return jsonify({
