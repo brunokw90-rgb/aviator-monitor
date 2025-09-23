@@ -54,9 +54,10 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 def _db_url() -> str:
     url = os.getenv("DATABASE_URL")
     if url:
-        # Força psycopg (versão 3) que funciona com Python 3.13
-        if "+psycopg" not in url:
-            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        # Força psycopg2 para compatibilidade
+        if "+psycopg2" not in url:
+            url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+            url = url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
         
         # Forçar IPv4 e melhorar conectividade
         if "?" in url:
@@ -77,12 +78,13 @@ def _db_url() -> str:
     if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
         raise RuntimeError("Defina DATABASE_URL ou todas as variáveis do banco.")
     return (
-        f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}"
+        f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}"
         f"@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode={DB_SSLMODE}&target_session_attrs=read-write&keepalives_idle=600&connect_timeout=10"
     )
 
 # Variável global para engine
 _engine = None
+_db_enabled = True  # Flag para controlar se o banco está funcionando
 
 # metadata global (usado para criar tabelas etc.)
 metadata = MetaData()
@@ -102,23 +104,32 @@ multipliers = Table(
 )
 
 def db_engine() -> Engine:
-    global _engine
-    if _engine is None:
-        _engine = create_engine(
-            _db_url(), 
-            pool_pre_ping=True, 
-            pool_size=5, 
-            max_overflow=5,
-            connect_args={
-                "connect_timeout": 10,
-                "server_settings": {"application_name": "aviator_monitor"},
-                "options": "-c default_transaction_isolation=read_committed"
-            }
-        )
-        metadata.create_all(_engine)
-    return _engine
+    global _engine, _db_enabled
+    if _engine is None and _db_enabled:
+        try:
+            _engine = create_engine(
+                _db_url(), 
+                pool_pre_ping=True, 
+                pool_size=5, 
+                max_overflow=5,
+                connect_args={
+                    "connect_timeout": 10,
+                    "server_settings": {"application_name": "aviator_monitor"},
+                    "options": "-c default_transaction_isolation=read_committed"
+                }
+            )
+            metadata.create_all(_engine)
+        except Exception as e:
+            print(f"[DB] Desabilitando banco devido a erro de driver: {e}")
+            _db_enabled = False
+            return None
+    return _engine if _db_enabled else None
 
 def save_rows(rows: list[dict], source: str | None = None) -> int:
+    if not _db_enabled:
+        print("[DB] Banco desabilitado - dados não salvos")
+        return 0
+        
     if not rows:
         return 0
 
@@ -127,18 +138,26 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
             r.setdefault("source", source)
 
     eng = db_engine()
+    if not eng:
+        return 0
+        
     inserted = 0
 
-    with eng.begin() as conn:
-        has_round = any(r.get("round") is not None for r in rows)
-        if has_round:
-            stmt = pg_insert(multipliers).values(rows)
-            stmt = stmt.on_conflict_do_nothing(index_elements=["round"])
-            result = conn.execute(stmt)
-            inserted = result.rowcount if result.rowcount and result.rowcount > 0 else 0
-        else:
-            result = conn.execute(multipliers.insert(), rows)
-            inserted = result.rowcount or 0
+    try:
+        with eng.begin() as conn:
+            has_round = any(r.get("round") is not None for r in rows)
+            if has_round:
+                stmt = pg_insert(multipliers).values(rows)
+                stmt = stmt.on_conflict_do_nothing(index_elements=["round"])
+                result = conn.execute(stmt)
+                inserted = result.rowcount if result.rowcount and result.rowcount > 0 else 0
+            else:
+                result = conn.execute(multipliers.insert(), rows)
+                inserted = result.rowcount or 0
+    except Exception as e:
+        print(f"[DB] Erro ao salvar (banco será desabilitado): {e}")
+        _db_enabled = False
+        return 0
 
     return inserted
 
