@@ -54,16 +54,16 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 def _db_url() -> str:
     url = os.getenv("DATABASE_URL")
     if url:
-        # asyncpg é o driver nativo PostgreSQL para Python
-        if "+asyncpg" not in url:
-            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
-            url = url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
+        # psycopg 3 - driver Python puro, sem compilação
+        if "+psycopg" not in url:
+            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+            url = url.replace("postgresql+asyncpg://", "postgresql+psycopg://", 1)
         
-        # Parâmetros de conexão otimizados
+        # Parâmetros simples para psycopg 3
         if "?" in url:
-            url += "&server_settings__application_name=aviator_monitor"
+            url += "&application_name=aviator_monitor"
         else:
-            url += "?sslmode=require&server_settings__application_name=aviator_monitor"
+            url += "?sslmode=require&application_name=aviator_monitor"
             
         return url
 
@@ -78,7 +78,7 @@ def _db_url() -> str:
     if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
         raise RuntimeError("Defina DATABASE_URL ou todas as variáveis do banco.")
     return (
-        f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}"
+        f"postgresql+psycopg://{DB_USER}:{DB_PASSWORD}"
         f"@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode={DB_SSLMODE}"
     )
 
@@ -107,16 +107,16 @@ def db_engine() -> Engine:
     if _engine is None:
         try:
             url = _db_url()
-            print(f"[DB] Conectando via asyncpg: {url[:60]}...")
+            print(f"[DB] Conectando via psycopg 3: {url[:60]}...")
             _engine = create_engine(
                 url, 
                 pool_pre_ping=True, 
                 pool_size=10, 
                 max_overflow=20,
-                echo=False  # asyncpg é mais verboso, desabilitamos echo
+                echo=False
             )
             metadata.create_all(_engine)
-            print("[DB] Sucesso! Engine asyncpg criada e tabelas verificadas")
+            print("[DB] Sucesso! Engine psycopg 3 criada - driver Python puro")
         except Exception as e:
             print(f"[DB] ERRO: {type(e).__name__}: {e}")
             return None
