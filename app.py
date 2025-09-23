@@ -106,8 +106,29 @@ def db_engine() -> Engine:
     global _engine
     if _engine is None:
         try:
+            # Debug da variável de ambiente
+            database_url = os.getenv("DATABASE_URL")
+            print(f"[DB] DATABASE_URL detectada: {bool(database_url)}")
+            
+            # Detectar se psycopg está disponível
+            try:
+                import psycopg
+                use_psycopg3 = True
+                print("[DB] psycopg 3 detectado - usando driver Python puro")
+            except ImportError:
+                use_psycopg3 = False
+                print("[DB] psycopg 3 não disponível - tentando fallback")
+            
             url = _db_url()
-            print(f"[DB] Conectando via psycopg 3: {url[:60]}...")
+            
+            # Forçar psycopg 3 se disponível
+            if use_psycopg3 and database_url:
+                url = url.replace("postgresql+psycopg2://", "postgresql+psycopg://")
+                url = url.replace("postgresql://", "postgresql+psycopg://")
+                print(f"[DB] Conectando via psycopg 3: {url[:60]}...")
+            else:
+                print(f"[DB] Fallback - URL: {url[:60]}...")
+            
             _engine = create_engine(
                 url, 
                 pool_pre_ping=True, 
@@ -116,7 +137,7 @@ def db_engine() -> Engine:
                 echo=False
             )
             metadata.create_all(_engine)
-            print("[DB] Sucesso! Engine psycopg 3 criada - driver Python puro")
+            print("[DB] SUCESSO! Engine criada e tabelas verificadas")
         except Exception as e:
             print(f"[DB] ERRO: {type(e).__name__}: {e}")
             return None
