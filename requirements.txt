@@ -1,9 +1,9 @@
-# Updated for Python 3.13 compatibility
+# Stable combination for Python 3.13
 flask==3.0.3
 gunicorn==21.2.0
 requests==2.32.3
 pandas==2.2.3
 python-dateutil==2.9.0.post0
 orjson==3.10.7
-SQLAlchemy==2.0.23
-psycopg[binary]==3.2.1
+SQLAlchemy==1.4.53
+psycopg2==2.9.9
