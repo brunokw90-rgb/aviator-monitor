@@ -110,24 +110,31 @@ def db_engine() -> Engine:
             database_url = os.getenv("DATABASE_URL")
             print(f"[DB] DATABASE_URL detectada: {bool(database_url)}")
             
-            # Detectar se psycopg está disponível
+            # Detectar driver disponível
             try:
                 import psycopg
-                use_psycopg3 = True
-                print("[DB] psycopg 3 detectado - usando driver Python puro")
+                driver_name = "psycopg3"
+                print("[DB] psycopg 3 detectado")
             except ImportError:
-                use_psycopg3 = False
-                print("[DB] psycopg 3 não disponível - tentando fallback")
+                try:
+                    import psycopg2
+                    driver_name = "psycopg2"
+                    print("[DB] psycopg2-binary detectado - usando driver estável")
+                except ImportError:
+                    print("[DB] ERRO: Nenhum driver PostgreSQL disponível")
+                    return None
             
             url = _db_url()
             
-            # Forçar psycopg 3 se disponível
-            if use_psycopg3 and database_url:
+            # Ajustar URL para o driver correto
+            if driver_name == "psycopg2":
+                url = url.replace("postgresql+psycopg://", "postgresql+psycopg2://")
+                url = url.replace("postgresql://", "postgresql+psycopg2://")
+                print(f"[DB] Conectando via psycopg2: {url[:60]}...")
+            else:
                 url = url.replace("postgresql+psycopg2://", "postgresql+psycopg://")
                 url = url.replace("postgresql://", "postgresql+psycopg://")
-                print(f"[DB] Conectando via psycopg 3: {url[:60]}...")
-            else:
-                print(f"[DB] Fallback - URL: {url[:60]}...")
+                print(f"[DB] Conectando via psycopg3: {url[:60]}...")
             
             _engine = create_engine(
                 url, 
