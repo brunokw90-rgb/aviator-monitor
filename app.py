@@ -627,15 +627,15 @@ def api_live():
 # =========================
 # Debug helpers
 # =========================
-@app.get("/debug/python")
-def debug_python():
-    import sys, platform
-    return {
-        "python_version": sys.version,
-        "python_version_info": list(sys.version_info),
-        "platform": platform.platform(),
-        "executable": sys.executable
-    }
+@app.get("/debug/source")
+def dbg_source():
+    return jsonify({
+        "using_json": bool(JSON_URL),
+        "using_csv": bool(CSV_PATH),
+        "json_url": JSON_URL or None,
+        "csv_path": CSV_PATH or None,
+        "window": WINDOW
+    })
 
 @app.get("/debug/sample")
 def dbg_sample():
