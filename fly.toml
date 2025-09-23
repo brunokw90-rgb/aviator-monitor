@@ -1,20 +1,28 @@
-app = "aviator-monitor"
-primary_region = "gru"
+# fly.toml app configuration file generated for aviator-monitor on 2025-09-22T23:28:47-03:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'aviator-monitor'
+primary_region = 'gru'
 
 [build]
 
 [env]
-  PORT = "8080"
+  PORT = '8080'
 
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = true
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
-  processes = ["app"]
+  processes = ['app']
 
 [[vm]]
-  cpu_kind = "shared"
+  cpu_kind = 'shared'
   cpus = 1
   memory_mb = 256
+
+[processes]
+app = "gunicorn --bind 0.0.0.0:8080 --workers 1 --threads 1 --max-requests 200 --max-requests-jitter 50 --timeout 120 --graceful-timeout 30 --keep-alive 5 app:app"

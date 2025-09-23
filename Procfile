@@ -1,1 +1,1 @@
-web: gunicorn app:app
+web: gunicorn --bind 0.0.0.0:8080 --workers ${WEB_CONCURRENCY:-1} --threads ${GUNICORN_THREADS:-1} --max-requests 200 --max-requests-jitter 50 --timeout 90 --graceful-timeout 30 --keep-alive 5 app:app

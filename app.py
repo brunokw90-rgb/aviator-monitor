@@ -651,6 +651,169 @@ def api_live():
         "table_html": table_html
     })
 
+# Adicione essas rotas ao seu app.py, antes da seção "# === DEBUG HELPERS ==="
+
+# =========================
+# Rotas do Banco de Dados
+# =========================
+
+@app.get("/db/count")
+@login_required
+def db_count():
+    """Retorna contagem total de registros no banco"""
+    try:
+        eng = db_engine()
+        if not eng:
+            return jsonify({"ok": False, "error": "Banco não disponível"}), 500
+            
+        with eng.connect() as conn:
+            result = conn.execute("SELECT COUNT(*) as total FROM multipliers")
+            total = result.fetchone()[0]
+            
+            # Também pega estatísticas básicas
+            stats_result = conn.execute("""
+                SELECT 
+                    MIN(multiplier) as min_mult,
+                    MAX(multiplier) as max_mult,
+                    AVG(multiplier) as avg_mult,
+                    COUNT(*) as total_records,
+                    MAX(datetime) as last_update
+                FROM multipliers 
+                WHERE multiplier IS NOT NULL
+            """)
+            stats = stats_result.fetchone()
+            
+        return jsonify({
+            "ok": True,
+            "total_records": total,
+            "stats": {
+                "min_multiplier": float(stats[0]) if stats[0] else None,
+                "max_multiplier": float(stats[1]) if stats[1] else None,
+                "avg_multiplier": round(float(stats[2]), 4) if stats[2] else None,
+                "last_update": stats[4].isoformat() if stats[4] else None
+            }
+        })
+        
+    except Exception as e:
+        print(f"[DB COUNT] Erro: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/db/last")
+@login_required
+def db_last():
+    """Retorna os últimos N registros do banco"""
+    try:
+        limit = request.args.get("limit", "50")
+        limit = max(1, min(1000, int(limit)))  # entre 1 e 1000
+        
+        eng = db_engine()
+        if not eng:
+            return jsonify({"ok": False, "error": "Banco não disponível"}), 500
+            
+        with eng.connect() as conn:
+            result = conn.execute(f"""
+                SELECT id, round, multiplier, datetime, source 
+                FROM multipliers 
+                ORDER BY datetime DESC, id DESC 
+                LIMIT {limit}
+            """)
+            
+            records = []
+            for row in result:
+                records.append({
+                    "id": row[0],
+                    "round": row[1],
+                    "multiplier": float(row[2]) if row[2] else None,
+                    "datetime": row[3].isoformat() if row[3] else None,
+                    "source": row[4]
+                })
+            
+        return jsonify({
+            "ok": True,
+            "limit": limit,
+            "count": len(records),
+            "records": records
+        })
+        
+    except Exception as e:
+        print(f"[DB LAST] Erro: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/db/stats")
+@login_required
+def db_stats():
+    """Retorna estatísticas detalhadas do banco"""
+    try:
+        window = request.args.get("window", str(WINDOW))
+        window = max(1, int(window))
+        
+        eng = db_engine()
+        if not eng:
+            return jsonify({"ok": False, "error": "Banco não disponível"}), 500
+            
+        with eng.connect() as conn:
+            # Busca os últimos registros na janela especificada
+            result = conn.execute(f"""
+                SELECT multiplier
+                FROM multipliers 
+                WHERE multiplier IS NOT NULL
+                ORDER BY datetime DESC, id DESC 
+                LIMIT {window}
+            """)
+            
+            multipliers = [float(row[0]) for row in result]
+            
+        if not multipliers:
+            return jsonify({
+                "ok": True,
+                "window": window,
+                "stats": {"n": 0, "message": "Nenhum dado encontrado"}
+            })
+            
+        # Calcula as mesmas estatísticas do dashboard
+        s = pd.Series(multipliers)
+        freqs = compute_freqs(s, window=window)
+        
+        return jsonify({
+            "ok": True,
+            "window": window,
+            "stats": freqs
+        })
+        
+    except Exception as e:
+        print(f"[DB STATS] Erro: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/db/clear")
+@login_required
+def db_clear():
+    """CUIDADO: Remove todos os dados do banco (apenas para desenvolvimento)"""
+    try:
+        # Só permite em desenvolvimento
+        if os.getenv("FLASK_ENV") != "development":
+            return jsonify({"ok": False, "error": "Operação não permitida em produção"}), 403
+            
+        eng = db_engine()
+        if not eng:
+            return jsonify({"ok": False, "error": "Banco não disponível"}), 500
+            
+        with eng.begin() as conn:
+            result = conn.execute("DELETE FROM multipliers")
+            deleted = result.rowcount or 0
+            
+        return jsonify({
+            "ok": True,
+            "deleted_records": deleted,
+            "message": "Todos os dados foram removidos"
+        })
+        
+    except Exception as e:
+        print(f"[DB CLEAR] Erro: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
+
 # =========================
 # Debug helpers
 # =========================
