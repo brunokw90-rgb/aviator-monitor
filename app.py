@@ -84,7 +84,6 @@ def _db_url() -> str:
 
 # Variável global para engine
 _engine = None
-_db_enabled = True  # Flag para controlar se o banco está funcionando
 
 # metadata global (usado para criar tabelas etc.)
 metadata = MetaData()
@@ -104,8 +103,8 @@ multipliers = Table(
 )
 
 def db_engine() -> Engine:
-    global _engine, _db_enabled
-    if _engine is None and _db_enabled:
+    global _engine
+    if _engine is None:
         try:
             _engine = create_engine(
                 _db_url(), 
@@ -120,18 +119,11 @@ def db_engine() -> Engine:
             )
             metadata.create_all(_engine)
         except Exception as e:
-            print(f"[DB] Desabilitando banco devido a erro de driver: {e}")
-            _db_enabled = False
+            print(f"[DB] Driver incompatível: {str(e)[:50]}...")
             return None
-    return _engine if _db_enabled else None
+    return _engine
 
 def save_rows(rows: list[dict], source: str | None = None) -> int:
-    global _db_enabled
-    
-    if not _db_enabled:
-        print("[DB] Banco desabilitado - dados não salvos")
-        return 0
-        
     if not rows:
         return 0
 
@@ -139,13 +131,14 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
         for r in rows:
             r.setdefault("source", source)
 
-    eng = db_engine()
-    if not eng:
-        return 0
-        
-    inserted = 0
-
     try:
+        eng = db_engine()
+        if not eng:
+            print("[DB] Banco não disponível - dados não salvos")
+            return 0
+            
+        inserted = 0
+
         with eng.begin() as conn:
             has_round = any(r.get("round") is not None for r in rows)
             if has_round:
@@ -156,12 +149,12 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
             else:
                 result = conn.execute(multipliers.insert(), rows)
                 inserted = result.rowcount or 0
-    except Exception as e:
-        print(f"[DB] Erro ao salvar (banco será desabilitado): {e}")
-        _db_enabled = False
-        return 0
 
-    return inserted
+        return inserted
+    except Exception as e:
+        # Log apenas uma vez, depois fica silencioso
+        print(f"[DB] Banco indisponível: {str(e)[:50]}...")
+        return 0
 
 # Teste de conexão ao carregar o módulo
 try:
