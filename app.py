@@ -54,16 +54,16 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 def _db_url() -> str:
     url = os.getenv("DATABASE_URL")
     if url:
-        # Força psycopg2 para compatibilidade
-        if "+psycopg2" not in url:
-            url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
-            url = url.replace("postgresql+psycopg://", "postgresql+psycopg2://", 1)
+        # asyncpg é o driver nativo PostgreSQL para Python
+        if "+asyncpg" not in url:
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            url = url.replace("postgresql+psycopg2://", "postgresql+asyncpg://", 1)
         
-        # Forçar IPv4 e melhorar conectividade
+        # Parâmetros de conexão otimizados
         if "?" in url:
-            url += "&target_session_attrs=read-write&keepalives_idle=600&connect_timeout=10"
+            url += "&server_settings__application_name=aviator_monitor"
         else:
-            url += "?sslmode=require&target_session_attrs=read-write&keepalives_idle=600&connect_timeout=10"
+            url += "?sslmode=require&server_settings__application_name=aviator_monitor"
             
         return url
 
@@ -78,8 +78,8 @@ def _db_url() -> str:
     if not all([DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD]):
         raise RuntimeError("Defina DATABASE_URL ou todas as variáveis do banco.")
     return (
-        f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}"
-        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode={DB_SSLMODE}&target_session_attrs=read-write&keepalives_idle=600&connect_timeout=10"
+        f"postgresql+asyncpg://{DB_USER}:{DB_PASSWORD}"
+        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}?sslmode={DB_SSLMODE}"
     )
 
 # Variável global para engine
@@ -107,22 +107,18 @@ def db_engine() -> Engine:
     if _engine is None:
         try:
             url = _db_url()
-            print(f"[DB] Tentando conectar com: {url[:50]}...")
+            print(f"[DB] Conectando via asyncpg: {url[:60]}...")
             _engine = create_engine(
                 url, 
                 pool_pre_ping=True, 
-                pool_size=5, 
-                max_overflow=5,
-                connect_args={
-                    "connect_timeout": 10,
-                    "server_settings": {"application_name": "aviator_monitor"},
-                    "options": "-c default_transaction_isolation=read_committed"
-                }
+                pool_size=10, 
+                max_overflow=20,
+                echo=False  # asyncpg é mais verboso, desabilitamos echo
             )
             metadata.create_all(_engine)
-            print("[DB] Engine criada e tabelas verificadas com sucesso!")
+            print("[DB] Sucesso! Engine asyncpg criada e tabelas verificadas")
         except Exception as e:
-            print(f"[DB] ERRO DETALHADO: {type(e).__name__}: {e}")
+            print(f"[DB] ERRO: {type(e).__name__}: {e}")
             return None
     return _engine
 
