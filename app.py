@@ -101,6 +101,7 @@ multipliers = Table(
     Column("raw", Text, nullable=True),
     UniqueConstraint("round", name="uq_multipliers_round"),
     Index("ix_multipliers_datetime", "datetime"),
+    Index("ix_multipliers_round", "round"),
 )
 
 def db_engine() -> Engine:
@@ -152,6 +153,7 @@ def db_engine() -> Engine:
     return _engine
 
 def save_rows(rows: list[dict], source: str | None = None) -> int:
+    """CORRIGIDO: Salva apenas registros novos, filtrando por round mais alto"""
     if not rows:
         return 0
 
@@ -164,19 +166,44 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
         if not eng:
             print("[DB] Engine retornou None - banco não disponível")
             return 0
+        
+        # FILTRO CRÍTICO: Pegar apenas rounds realmente novos
+        if rows:
+            # Primeiro, descobre qual é o maior round já no banco
+            with eng.connect() as conn:
+                result = conn.execute(text("SELECT COALESCE(MAX(round), 0) FROM multipliers"))
+                max_round_db = result.fetchone()[0] or 0
+            
+            # Filtra apenas rounds MAIORES que o que já temos
+            valid_rows = []
+            for r in rows:
+                round_num = r.get('round')
+                if round_num and round_num > max_round_db:
+                    valid_rows.append(r)
+            
+            # Ordena por round decrescente e pega só os mais recentes
+            if valid_rows:
+                valid_rows = sorted(valid_rows, key=lambda x: x.get('round', 0) or 0, reverse=True)
+                # Limita a 20 novos registros por vez para evitar spam
+                rows = valid_rows[:20]
+                print(f"[DB] Filtrados {len(rows)} registros novos (rounds > {max_round_db})")
+            else:
+                rows = []
+                print(f"[DB] Nenhum registro novo (max round DB: {max_round_db})")
             
         inserted = 0
 
-        with eng.begin() as conn:
-            has_round = any(r.get("round") is not None for r in rows)
-            if has_round:
-                stmt = pg_insert(multipliers).values(rows)
-                stmt = stmt.on_conflict_do_nothing(index_elements=["round"])
-                result = conn.execute(stmt)
-                inserted = result.rowcount if result.rowcount and result.rowcount > 0 else 0
-            else:
-                result = conn.execute(multipliers.insert(), rows)
-                inserted = result.rowcount or 0
+        if rows:  # Só tenta inserir se há dados válidos
+            with eng.begin() as conn:
+                has_round = any(r.get("round") is not None for r in rows)
+                if has_round:
+                    stmt = pg_insert(multipliers).values(rows)
+                    stmt = stmt.on_conflict_do_nothing(index_elements=["round"])
+                    result = conn.execute(stmt)
+                    inserted = result.rowcount if result.rowcount and result.rowcount > 0 else 0
+                else:
+                    result = conn.execute(multipliers.insert(), rows)
+                    inserted = result.rowcount or 0
 
         print(f"[DB] SUCESSO! Inseridas {inserted} linhas")
         return inserted
@@ -392,30 +419,25 @@ def compute_freqs(s: pd.Series, window: int = 500) -> dict:
     }
 
 def build_table_html(df: pd.DataFrame, limit: int = 50) -> str:
-    """Gera HTML da tabela com últimas N linhas (prioriza colunas úteis, mais recentes primeiro)."""
+    """CORRIGIDO: Gera HTML ordenado por ROUND decrescente (mais recente primeiro)"""
     if df is None or df.empty:
         return "<em>Sem dados</em>"
 
-    preferred = ("multiplier", "mult", "m", "valor", "value",
-                 "datetime", "data", "date", "hora", "time", "end",
-                 "round", "rodada", "id")
-    cols = [c for c in df.columns if c.lower() in preferred]
-
-    # Tenta ordenar pelo campo de data/hora, se existir
-    order_col = None
-    for c in ("datetime", "data", "date", "hora", "time", "end"):
-        if c in df.columns:
-            order_col = c
+    # Usar ROUND como campo de ordenação principal (mais confiável que datetime)
+    round_col = None
+    for c in df.columns:
+        if c.lower() in ("round", "rodada", "id"):
+            round_col = c
             break
-
-    if order_col:
-        show = df[cols].sort_values(order_col, ascending=False).head(limit) if cols else df.sort_values(order_col, ascending=False).head(limit)
+    
+    if round_col and round_col in df.columns:
+        # Ordena por round DECRESCENTE (maior = mais recente)
+        show = df.sort_values(round_col, ascending=False).head(limit)
+        print(f"[TABLE] Ordenado por {round_col} decrescente - primeiro round: {show.iloc[0][round_col] if not show.empty else 'N/A'}")
     else:
-        show = df[cols].iloc[::-1].head(limit) if cols else df.iloc[::-1].head(limit)  # Se não tiver coluna de data, inverte a ordem
-
-    # garante ordenação do mais novo para o mais antigo (se tiver datetime como tipo datetime)
-    if "datetime" in show.columns and pd.api.types.is_datetime64_any_dtype(show["datetime"]):
-        show = show.sort_values("datetime", ascending=False)
+        # Fallback: usar index invertido
+        show = df.iloc[::-1].head(limit)
+        print("[TABLE] Usando ordenação por index invertido")
 
     return show.to_html(index=False, classes="mono")
 
@@ -474,7 +496,7 @@ DASH_HTML = """
       <div class="muted">Atualizado em</div>
       <div class="mono" id="updated_at">{{ updated_at }}</div>
 
-      <div class="muted" style="margin-top:8px">Últimos 50 registros</div>
+      <div class="muted" style="margin-top:8px">Últimos registros (round decrescente)</div>
       <div id="table_wrap">{{ table_html | safe }}</div>
     </div>
   </div>
@@ -515,7 +537,7 @@ DASH_HTML = """
     if (!hasAll()){ console.warn('IDs faltando no HTML'); return; }
     refreshLive();
     window._liveTimer && clearInterval(window._liveTimer);
-    window.__liveTimer = setInterval(refreshLive, 2000);
+    window.__liveTimer = setInterval(refreshLive, 3000); // Reduzido para 3s
   }
 
   document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) refreshLive(); });
@@ -551,7 +573,8 @@ def db_count():
                     MAX(multiplier) as max_mult,
                     AVG(multiplier) as avg_mult,
                     COUNT(*) as total_records,
-                    MAX(datetime) as last_update
+                    MAX(datetime) as last_update,
+                    MAX(round) as max_round
                 FROM multipliers 
                 WHERE multiplier IS NOT NULL
             """))
@@ -564,7 +587,8 @@ def db_count():
                 "min_multiplier": float(stats[0]) if stats[0] else None,
                 "max_multiplier": float(stats[1]) if stats[1] else None,
                 "avg_multiplier": round(float(stats[2]), 4) if stats[2] else None,
-                "last_update": stats[4].isoformat() if stats[4] else None
+                "last_update": stats[4].isoformat() if stats[4] else None,
+                "max_round": int(stats[5]) if stats[5] else None
             }
         })
         
@@ -576,21 +600,21 @@ def db_count():
 @app.get("/db/last")
 @login_required
 def db_last():
-    """Retorna os últimos N registros do banco"""
+    """CORRIGIDO: Retorna os últimos N registros ORDENADOS POR ROUND DECRESCENTE"""
     try:
         limit = request.args.get("limit", "50")
-        limit = max(1, min(1000, int(limit)))  # entre 1 e 1000
+        limit = max(1, min(1000, int(limit)))
         
         eng = db_engine()
         if not eng:
             return jsonify({"ok": False, "error": "Banco não disponível"}), 500
             
         with eng.connect() as conn:
-            # Usando text() com parâmetro bindado para segurança
+            # CRÍTICO: Ordenar por round DESC (maior primeiro)
             result = conn.execute(text("""
                 SELECT id, round, multiplier, datetime, source 
                 FROM multipliers 
-                ORDER BY datetime DESC, id DESC 
+                ORDER BY round DESC NULLS LAST, id DESC 
                 LIMIT :limit_val
             """), {"limit_val": limit})
             
@@ -619,7 +643,7 @@ def db_last():
 @app.get("/db/stats")
 @login_required
 def db_stats():
-    """Retorna estatísticas detalhadas do banco"""
+    """CORRIGIDO: Retorna estatísticas dos registros mais recentes por ROUND"""
     try:
         window = request.args.get("window", str(WINDOW))
         window = max(1, int(window))
@@ -629,12 +653,12 @@ def db_stats():
             return jsonify({"ok": False, "error": "Banco não disponível"}), 500
             
         with eng.connect() as conn:
-            # Busca os últimos registros na janela especificada
+            # CRÍTICO: Ordenar por round DESC
             result = conn.execute(text("""
                 SELECT multiplier
                 FROM multipliers 
                 WHERE multiplier IS NOT NULL
-                ORDER BY datetime DESC, id DESC 
+                ORDER BY round DESC NULLS LAST, id DESC 
                 LIMIT :window_val
             """), {"window_val": window})
             
@@ -647,7 +671,6 @@ def db_stats():
                 "stats": {"n": 0, "message": "Nenhum dado encontrado"}
             })
             
-        # Calcula as mesmas estatísticas do dashboard
         s = pd.Series(multipliers)
         freqs = compute_freqs(s, window=window)
         
@@ -702,15 +725,42 @@ def logout():
 @app.get("/")
 @login_required
 def dashboard():
+    """CORRIGIDO: Dashboard com dados do banco ordenados por round"""
     try:
-        df = load_df(CSV_PATH, JSON_URL)
+        # Buscar dados diretamente do banco para garantir consistência
+        eng = db_engine()
+        if eng:
+            with eng.connect() as conn:
+                # Pegar os últimos registros por round para exibir
+                result = conn.execute(text("""
+                    SELECT multiplier, datetime, round 
+                    FROM multipliers 
+                    WHERE multiplier IS NOT NULL
+                    ORDER BY round DESC NULLS LAST 
+                    LIMIT 100
+                """))
+                
+                rows = []
+                for row in result:
+                    rows.append({
+                        "multiplier": float(row[0]),
+                        "datetime": row[1] if row[1] else None,
+                        "round": row[2]
+                    })
+                
+                df = pd.DataFrame(rows)
+        else:
+            # Fallback para fonte externa se banco não disponível
+            df = load_df(CSV_PATH, JSON_URL)
+            
         s = get_multiplier_series(df)
         freqs = compute_freqs(s, window=WINDOW)
         updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        source = JSON_URL if JSON_URL else CSV_PATH
+        source = "Banco PostgreSQL" if eng else (JSON_URL if JSON_URL else CSV_PATH)
         table_html = build_table_html(df)
+        
     except Exception as e:
-        # Loga stacktrace completo no Render
+        # Loga stacktrace completo
         app.logger.exception("Erro no dashboard")
         # Fallback bem simples para não quebrar
         freqs = {
@@ -720,8 +770,8 @@ def dashboard():
             "cuts": {"2x": 0, "5x": 0, "10x": 0, "20x": 0}
         }
         updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        source = JSON_URL if JSON_URL else CSV_PATH
-        table_html = "<em>Erro ao carregar dados (veja logs)</em>"
+        source = "Erro: " + str(e)[:100]
+        table_html = "<em>Erro ao carregar dados</em>"
 
     return render_template_string(
         DASH_HTML,
@@ -735,47 +785,76 @@ def dashboard():
 @app.get("/api/live")
 @login_required
 def api_live():
-    df = load_df(CSV_PATH, JSON_URL)
+    """CORRIGIDO: API que prioriza dados do banco mas ainda coleta novos dados"""
+    # Primeiro, tenta coletar dados novos da fonte externa
+    try:
+        df_source = load_df(CSV_PATH, JSON_URL)
+        if not df_source.empty:
+            # Prepara dados para salvar (só os válidos)
+            rows = []
+            col_mult = next((c for c in df_source.columns if c.lower() in ("multiplier","mult","m","valor","value","x")), None)
+            col_round = next((c for c in df_source.columns if c.lower() in ("round","rodada","id")), None)
+            col_dt = next((c for c in df_source.columns if c.lower() in ("datetime","data","date","hora","time")), None)
+
+            if col_mult and col_round:  # Precisa ter pelo menos multiplier e round
+                for _, r in df_source.iterrows():
+                    if pd.notna(r[col_mult]) and pd.notna(r[col_round]):
+                        rows.append({
+                            "multiplier": float(r[col_mult]),
+                            "round": int(r[col_round]),
+                            "datetime": pd.to_datetime(r[col_dt], errors="coerce") if col_dt else None,
+                            "raw": None,
+                        })
+
+            # Salva novos dados (função já filtra por round > max_round)
+            inserted = save_rows(rows, source=JSON_URL or CSV_PATH)
+            print(f"[API_LIVE] Processados {len(rows)} registros, inseridos: {inserted}")
+    except Exception as e:
+        print(f"[API_LIVE] Erro ao coletar dados externos: {e}")
+        inserted = 0
+
+    # Agora busca dados do banco para exibir (sempre atualizado)
+    try:
+        eng = db_engine()
+        if eng:
+            with eng.connect() as conn:
+                # Buscar dados do banco ordenados corretamente
+                result = conn.execute(text("""
+                    SELECT multiplier, datetime, round 
+                    FROM multipliers 
+                    WHERE multiplier IS NOT NULL
+                    ORDER BY round DESC NULLS LAST 
+                    LIMIT :limit_val
+                """), {"limit_val": WINDOW})
+                
+                rows = []
+                for row in result:
+                    rows.append({
+                        "multiplier": float(row[0]),
+                        "datetime": row[1] if row[1] else None,
+                        "round": row[2]
+                    })
+                
+                df = pd.DataFrame(rows)
+        else:
+            df = pd.DataFrame(columns=["multiplier", "datetime", "round"])
+            
+    except Exception as e:
+        print(f"[API_LIVE] Erro ao buscar do banco: {e}")
+        df = pd.DataFrame(columns=["multiplier", "datetime", "round"])
+
+    # Calcula métricas e monta resposta
     s = get_multiplier_series(df)
     freqs = compute_freqs(s, window=WINDOW)
     table_html = build_table_html(df)
-    
-    # Persistência leve (salva últimas leituras)
-    try:
-        # prepara linhas para salvar
-        rows = []
-        if not df.empty:
-            # escolhe colunas que existirão no seu DataFrame
-            col_mult = next((c for c in df.columns if c.lower() in ("multiplier","mult","m","valor","value","x")), None)
-            col_round = next((c for c in df.columns if c.lower() in ("round","rodada","id")), None)
-            col_dt    = next((c for c in df.columns if c.lower() in ("datetime","data","date","hora","time")), None)
-
-            # usamos somente as N últimas para não forçar o free tier
-            for _, r in df.tail(50).iterrows():
-                rows.append({
-                    "multiplier": float(r[col_mult]) if col_mult and pd.notna(r[col_mult]) else None,
-                    "round": int(r[col_round]) if col_round and pd.notna(r[col_round]) else None,
-                    "datetime": pd.to_datetime(r[col_dt], errors="coerce") if col_dt else None,
-                    "raw": None,  # se quiser, json.dumps(r.to_dict(), ensure_ascii=False)
-                })
-
-            # limpa inválidos
-            rows = [x for x in rows if x["multiplier"] is not None]
-
-        # salva (upsert por round quando houver)
-        inserted = save_rows(rows, source=JSON_URL or CSV_PATH)
-        # log simples
-        print(f"[DB] inseridas: {inserted}")
-    except Exception as e:
-        # não quebrar o endpoint em caso de falha do banco
-        print(f"[DB] erro ao inserir: {e}")
         
     return jsonify({
         "ok": True,
         "updated_at": datetime.now().isoformat(timespec="seconds"),
         "window": WINDOW,
         "freqs": freqs,
-        "table_html": table_html
+        "table_html": table_html,
+        "inserted_new": inserted  # Para debug
     })
 
 # =========================
@@ -811,8 +890,21 @@ def dbg_sample():
         df = load_df(CSV_PATH, JSON_URL)
         shape = [int(df.shape[0]), int(df.shape[1])]
         cols = list(df.columns)
-        rows = df.head(5).to_dict(orient="records")
-        return jsonify({"ok": True, "shape": shape, "columns": cols, "rows": rows})
+        
+        # Ordena por round decrescente para debug
+        if "round" in df.columns:
+            df_sorted = df.sort_values("round", ascending=False)
+            rows = df_sorted.head(10).to_dict(orient="records")
+        else:
+            rows = df.head(10).to_dict(orient="records")
+            
+        return jsonify({
+            "ok": True, 
+            "shape": shape, 
+            "columns": cols, 
+            "rows": rows,
+            "note": "Ordenado por round decrescente para debug"
+        })
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -843,12 +935,12 @@ def dbg_db_url():
         return {
             "ok": True,
             "vars": flags,
-            "scheme": p.scheme,           # deve ser "postgresql+psycopg2"
-            "username": p.username,       # ex.: postgres.<project-ref>
-            "hostname": p.hostname,       # ESPERADO: aws-1-sa-east-1.pooler.supabase.com
-            "port": p.port,               # 5432
-            "path": p.path,               # /postgres
-            "query": p.query,             # sslmode=require
+            "scheme": p.scheme,
+            "username": p.username,
+            "hostname": p.hostname,
+            "port": p.port,
+            "path": p.path,
+            "query": p.query,
         }, 200
     except Exception as e:
         return {"ok": False, "error": repr(e)}, 200
