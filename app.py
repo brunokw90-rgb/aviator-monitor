@@ -153,7 +153,7 @@ def db_engine() -> Engine:
     return _engine
 
 def save_rows(rows: list[dict], source: str | None = None) -> int:
-    """CORRIGIDO: Salva apenas registros novos, filtrando por round mais alto"""
+    """CORRIGIDO: Salva apenas registros novos + adiciona timestamp atual"""
     if not rows:
         return 0
 
@@ -176,9 +176,13 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
             
             # Filtra apenas rounds MAIORES que o que já temos
             valid_rows = []
+            current_time = datetime.now()  # Captura horário atual
+            
             for r in rows:
                 round_num = r.get('round')
                 if round_num and round_num > max_round_db:
+                    # NOVO: Define timestamp atual para novos registros
+                    r['datetime'] = current_time
                     valid_rows.append(r)
             
             # Ordena por round decrescente e pega só os mais recentes
@@ -186,7 +190,7 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
                 valid_rows = sorted(valid_rows, key=lambda x: x.get('round', 0) or 0, reverse=True)
                 # Limita a 20 novos registros por vez para evitar spam
                 rows = valid_rows[:20]
-                print(f"[DB] Filtrados {len(rows)} registros novos (rounds > {max_round_db})")
+                print(f"[DB] Filtrados {len(rows)} registros novos (rounds > {max_round_db}) com timestamp atual")
             else:
                 rows = []
                 print(f"[DB] Nenhum registro novo (max round DB: {max_round_db})")
@@ -205,7 +209,7 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
                     result = conn.execute(multipliers.insert(), rows)
                     inserted = result.rowcount or 0
 
-        print(f"[DB] SUCESSO! Inseridas {inserted} linhas")
+        print(f"[DB] SUCESSO! Inseridas {inserted} linhas com horário atual")
         return inserted
     except Exception as e:
         print(f"[DB] ERRO AO SALVAR: {type(e).__name__}: {e}")
@@ -419,7 +423,7 @@ def compute_freqs(s: pd.Series, window: int = 500) -> dict:
     }
 
 def build_table_html(df: pd.DataFrame, limit: int = 50) -> str:
-    """CORRIGIDO: Gera HTML ordenado por ROUND decrescente (mais recente primeiro)"""
+    """CORRIGIDO: Gera HTML com formatação de horário melhorada"""
     if df is None or df.empty:
         return "<em>Sem dados</em>"
 
@@ -432,14 +436,29 @@ def build_table_html(df: pd.DataFrame, limit: int = 50) -> str:
     
     if round_col and round_col in df.columns:
         # Ordena por round DECRESCENTE (maior = mais recente)
-        show = df.sort_values(round_col, ascending=False).head(limit)
+        show = df.sort_values(round_col, ascending=False).head(limit).copy()
         print(f"[TABLE] Ordenado por {round_col} decrescente - primeiro round: {show.iloc[0][round_col] if not show.empty else 'N/A'}")
     else:
         # Fallback: usar index invertido
-        show = df.iloc[::-1].head(limit)
+        show = df.iloc[::-1].head(limit).copy()
         print("[TABLE] Usando ordenação por index invertido")
+    
+    # NOVO: Formatar datetime para mostrar só hora:minuto:segundo se for de hoje
+    if 'datetime' in show.columns:
+        def format_datetime(dt):
+            if pd.isna(dt):
+                return "N/A"
+            if hasattr(dt, 'strftime'):
+                # Se for de hoje, mostra só hora
+                if dt.date() == datetime.now().date():
+                    return dt.strftime("%H:%M:%S")
+                else:
+                    return dt.strftime("%d/%m %H:%M:%S")
+            return str(dt)
+        
+        show['datetime'] = show['datetime'].apply(format_datetime)
 
-    return show.to_html(index=False, classes="mono")
+    return show.to_html(index=False, classes="mono", escape=False)
 
 # =========================
 # Template (Dashboard HTML)
@@ -725,7 +744,7 @@ def logout():
 @app.get("/")
 @login_required
 def dashboard():
-    """CORRIGIDO: Dashboard com dados do banco ordenados por round"""
+    """CORRIGIDO: Dashboard com horários formatados"""
     try:
         # Buscar dados diretamente do banco para garantir consistência
         eng = db_engine()
@@ -744,7 +763,7 @@ def dashboard():
                 for row in result:
                     rows.append({
                         "multiplier": float(row[0]),
-                        "datetime": row[1] if row[1] else None,
+                        "datetime": row[1] if row[1] else datetime.now(),  # Fallback para agora
                         "round": row[2]
                     })
                 
@@ -944,6 +963,30 @@ def dbg_db_url():
         }, 200
     except Exception as e:
         return {"ok": False, "error": repr(e)}, 200
+
+
+@app.get("/db/reset")
+@login_required  
+def db_reset():
+    """Reset completo da tabela - USE COM CUIDADO"""
+    try:
+        eng = db_engine()
+        if not eng:
+            return jsonify({"ok": False, "error": "Banco não disponível"}), 500
+            
+        with eng.begin() as conn:
+            result = conn.execute(text("DELETE FROM multipliers"))
+            deleted = result.rowcount or 0
+            
+        return jsonify({
+            "ok": True,
+            "deleted_records": deleted,
+            "message": f"Tabela resetada! {deleted} registros removidos"
+        })
+        
+    except Exception as e:
+        print(f"[DB RESET] Erro: {e}")
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 # =========================
 # Main
