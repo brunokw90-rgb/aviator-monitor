@@ -106,8 +106,10 @@ def db_engine() -> Engine:
     global _engine
     if _engine is None:
         try:
+            url = _db_url()
+            print(f"[DB] Tentando conectar com: {url[:50]}...")
             _engine = create_engine(
-                _db_url(), 
+                url, 
                 pool_pre_ping=True, 
                 pool_size=5, 
                 max_overflow=5,
@@ -118,8 +120,9 @@ def db_engine() -> Engine:
                 }
             )
             metadata.create_all(_engine)
+            print("[DB] Engine criada e tabelas verificadas com sucesso!")
         except Exception as e:
-            print(f"[DB] Driver incompatível: {str(e)[:50]}...")
+            print(f"[DB] ERRO DETALHADO: {type(e).__name__}: {e}")
             return None
     return _engine
 
@@ -134,7 +137,7 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
     try:
         eng = db_engine()
         if not eng:
-            print("[DB] Banco não disponível - dados não salvos")
+            print("[DB] Engine retornou None - banco não disponível")
             return 0
             
         inserted = 0
@@ -150,10 +153,10 @@ def save_rows(rows: list[dict], source: str | None = None) -> int:
                 result = conn.execute(multipliers.insert(), rows)
                 inserted = result.rowcount or 0
 
+        print(f"[DB] SUCESSO! Inseridas {inserted} linhas")
         return inserted
     except Exception as e:
-        # Log apenas uma vez, depois fica silencioso
-        print(f"[DB] Banco indisponível: {str(e)[:50]}...")
+        print(f"[DB] ERRO AO SALVAR: {type(e).__name__}: {e}")
         return 0
 
 # Teste de conexão ao carregar o módulo
@@ -627,15 +630,15 @@ def api_live():
 # =========================
 # Debug helpers
 # =========================
-@app.get("/debug/source")
-def dbg_source():
-    return jsonify({
-        "using_json": bool(JSON_URL),
-        "using_csv": bool(CSV_PATH),
-        "json_url": JSON_URL or None,
-        "csv_path": CSV_PATH or None,
-        "window": WINDOW
-    })
+@app.get("/debug/python")
+def debug_python():
+    import sys, platform
+    return {
+        "python_version": sys.version,
+        "python_version_info": list(sys.version_info),
+        "platform": platform.platform(),
+        "executable": sys.executable
+    }
 
 @app.get("/debug/sample")
 def dbg_sample():
