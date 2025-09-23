@@ -126,6 +126,8 @@ def db_engine() -> Engine:
     return _engine if _db_enabled else None
 
 def save_rows(rows: list[dict], source: str | None = None) -> int:
+    global _db_enabled
+    
     if not _db_enabled:
         print("[DB] Banco desabilitado - dados não salvos")
         return 0
